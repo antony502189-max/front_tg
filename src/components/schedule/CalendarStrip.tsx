@@ -1,4 +1,9 @@
 import type { DaySchedule } from '../../api/schedule'
+import { parseDateKey, toDateKey } from '../../utils/date'
+
+const weekdayFormatter = new Intl.DateTimeFormat('ru-RU', {
+  weekday: 'short',
+})
 
 type CalendarStripProps = {
   days: DaySchedule[]
@@ -7,19 +12,17 @@ type CalendarStripProps = {
 }
 
 const formatWeekday = (dateString: string) => {
-  const date = new Date(dateString)
-  if (Number.isNaN(date.getTime())) {
+  const date = parseDateKey(dateString)
+  if (!date) {
     return ''
   }
 
-  return date.toLocaleDateString('ru-RU', {
-    weekday: 'short',
-  })
+  return weekdayFormatter.format(date)
 }
 
 const getDayNumber = (dateString: string) => {
-  const date = new Date(dateString)
-  if (Number.isNaN(date.getTime())) {
+  const date = parseDateKey(dateString)
+  if (!date) {
     return ''
   }
 
@@ -31,7 +34,7 @@ export const CalendarStrip = ({
   selectedDate,
   onSelectDate,
 }: CalendarStripProps) => {
-  const todayKey = new Date().toISOString().slice(0, 10)
+  const todayKey = toDateKey(new Date())
 
   return (
     <div className="schedule-calendar-strip">

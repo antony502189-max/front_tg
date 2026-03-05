@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
-import { fetchGrades } from '../api/grades'
-import type { GradesResponse } from '../mocks/grades'
+import { fetchGrades, type GradesResponse } from '../api/grades'
 import { useUserStore } from '../store/userStore'
 
 type GradesState = {
@@ -13,6 +12,7 @@ export const StudyPage = () => {
   const studentCardNumber = useUserStore(
     (state) => state.studentCardNumber,
   )
+  const normalizedStudentCardNumber = studentCardNumber?.trim() ?? ''
 
   const [reloadToken, setReloadToken] = useState(0)
   const [state, setState] = useState<GradesState>({
@@ -22,7 +22,7 @@ export const StudyPage = () => {
   })
 
   useEffect(() => {
-    if (!studentCardNumber) {
+    if (!normalizedStudentCardNumber) {
       setState({
         data: null,
         isLoading: false,
@@ -39,7 +39,7 @@ export const StudyPage = () => {
       error: null,
     }))
 
-    void fetchGrades(studentCardNumber)
+    void fetchGrades(normalizedStudentCardNumber)
       .then((data) => {
         if (isCancelled) return
 
@@ -62,12 +62,12 @@ export const StudyPage = () => {
     return () => {
       isCancelled = true
     }
-  }, [studentCardNumber, reloadToken])
+  }, [normalizedStudentCardNumber, reloadToken])
 
   const { data, isLoading, error } = state
   const displayError =
     error ??
-    (!studentCardNumber
+    (!normalizedStudentCardNumber
       ? 'Добавьте номер студенческого в настройках, чтобы видеть успеваемость.'
       : null)
   const summary = data?.summary
@@ -101,7 +101,7 @@ export const StudyPage = () => {
         {!isLoading && displayError && (
           <div className="study-error-card">
             <p className="study-error-text">{displayError}</p>
-            {studentCardNumber && (
+            {normalizedStudentCardNumber && (
               <button
                 type="button"
                 className="study-retry-button"

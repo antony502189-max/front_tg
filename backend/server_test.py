@@ -1,7 +1,7 @@
 import unittest
 from datetime import date
 
-from backend_server import (
+from backend.server import (
     BackendApp,
     CacheEntry,
     UpstreamRequestError,
@@ -29,7 +29,7 @@ TEST_CONFIG = {
 
 class BackendServerTests(unittest.TestCase):
     def test_route_config_resolves_known_routes(self) -> None:
-        self.assertEqual(route_config("/api/schedule").upstream_path, "/schedule")
+        self.assertEqual(route_config("/api/schedule").cache_namespace, "/schedule")
         self.assertEqual(route_config("/api/grades").query_param, "studentCardNumber")
         self.assertEqual(route_config("/api/employees").min_length, 2)
         self.assertIsNone(route_config("/unknown"))
@@ -154,6 +154,49 @@ class BackendServerTests(unittest.TestCase):
         self.assertEqual(monday["lessons"][0]["subject"], "Higher Math")
         self.assertEqual(monday["lessons"][0]["teacher"], "Ivanov Ivan Ivanovich")
 
+    def test_schedule_route_returns_frontend_contract(self) -> None:
+        def fetcher(path: str, _params: dict[str, str]):
+            if path == "/schedule":
+                return {
+                    "schedules": {
+                        "Понедельник": [
+                            {
+                                "subjectFullName": "Высшая математика",
+                                "startLessonTime": "10:05",
+                                "endLessonTime": "11:30",
+                                "lessonTypeAbbrev": "ЛК",
+                                "auditories": ["101-1"],
+                                "employees": [{"fio": "Иванов И.И."}],
+                            }
+                        ]
+                    }
+                }
+
+            if path == "/schedule/current-week":
+                return 3
+
+            raise AssertionError(f"Unexpected path: {path}")
+
+        app = BackendApp(
+            config=TEST_CONFIG,
+            fetcher=fetcher,
+            today=lambda: date(2026, 3, 4),
+        )
+
+        response = app.handle_request("GET", "/api/schedule?studentGroup=353502")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.payload["days"]), 6)
+        monday = response.payload["days"][0]
+        lesson = monday["lessons"][0]
+        self.assertEqual(monday["date"], "2026-03-02")
+        self.assertEqual(lesson["subject"], "Высшая математика")
+        self.assertEqual(lesson["teacher"], "Иванов И.И.")
+        self.assertEqual(lesson["room"], "101-1")
+        self.assertEqual(lesson["type"], "ЛК")
+        self.assertEqual(lesson["startTime"], "10:05")
+        self.assertEqual(lesson["endTime"], "11:30")
+
     def test_normalize_employees_response_unwraps_value_payload(self) -> None:
         payload = {
             "value": [
@@ -174,6 +217,42 @@ class BackendServerTests(unittest.TestCase):
         self.assertEqual(
             normalized[0]["avatarUrl"],
             "https://iis.bsuir.by/api/v1/employees/photo/42",
+        )
+
+    def test_employees_route_returns_normalized_list(self) -> None:
+        def fetcher(path: str, _params: dict[str, str]):
+            if path == "/employees/fio":
+                return {
+                    "value": [
+                        {
+                            "id": 7,
+                            "lastName": "Петров",
+                            "firstName": "Пётр",
+                            "middleName": "Петрович",
+                            "jobPosition": "Доцент",
+                            "academicDepartment": "СиСИ",
+                        }
+                    ]
+                }
+
+            raise AssertionError(f"Unexpected path: {path}")
+
+        app = BackendApp(config=TEST_CONFIG, fetcher=fetcher)
+
+        response = app.handle_request("GET", "/api/employees?q=Пе")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.payload,
+            [
+                {
+                    "id": "7",
+                    "fullName": "Петров Пётр Петрович",
+                    "position": "Доцент",
+                    "department": "СиСИ",
+                    "avatarUrl": "https://iis.bsuir.by/api/v1/employees/photo/7",
+                }
+            ],
         )
 
     def test_normalize_grades_response_combines_summary_and_subjects(self) -> None:
@@ -204,6 +283,34 @@ class BackendServerTests(unittest.TestCase):
         self.assertEqual(normalized["summary"]["speciality"], "CS")
         self.assertEqual(normalized["subjects"][0]["subject"], "Math")
         self.assertEqual(len(normalized["subjects"][0]["marks"]), 2)
+
+    def test_grades_route_handles_partial_upstream_failure(self) -> None:
+        def fetcher(path: str, _params: dict[str, str]):
+            if path == "/rating/studentSearch":
+                raise UpstreamRequestError("search unavailable", status=503)
+
+            if path == "/rating/studentRating":
+                return {
+                    "subjects": [
+                        {
+                            "id": "math",
+                            "disciplineName": "Математика",
+                            "teacher": "Иванов И.И.",
+                            "controlPoints": [{"score": 9}, {"value": 8}],
+                        }
+                    ]
+                }
+
+            raise AssertionError(f"Unexpected path: {path}")
+
+        app = BackendApp(config=TEST_CONFIG, fetcher=fetcher)
+
+        response = app.handle_request("GET", "/api/grades?studentCardNumber=123")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.payload["subjects"][0]["subject"], "Математика")
+        self.assertEqual(response.payload["subjects"][0]["teacher"], "Иванов И.И.")
+        self.assertEqual(len(response.payload["subjects"][0]["marks"]), 2)
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import Request, urlopen
@@ -18,6 +18,29 @@ JsonValue = Any
 Fetcher = Callable[[str, dict[str, str]], JsonValue]
 NowFn = Callable[[], int]
 TodayFn = Callable[[], date]
+
+
+@dataclass(frozen=True)
+class AppConfig:
+    port: int
+    iis_base_url: str
+    cache_ttl_ms: int
+    stale_ttl_ms: int
+    request_timeout_ms: int
+    max_retries: int
+    retry_delay_ms: int
+
+    @classmethod
+    def from_mapping(cls, values: Mapping[str, Any]) -> "AppConfig":
+        return cls(
+            port=int(values["port"]),
+            iis_base_url=str(values["iis_base_url"]),
+            cache_ttl_ms=int(values["cache_ttl_ms"]),
+            stale_ttl_ms=int(values["stale_ttl_ms"]),
+            request_timeout_ms=int(values["request_timeout_ms"]),
+            max_retries=int(values["max_retries"]),
+            retry_delay_ms=int(values["retry_delay_ms"]),
+        )
 
 
 RUSSIAN_WEEKDAY_TO_INDEX = {
@@ -44,27 +67,70 @@ def parse_number_env(name: str, fallback: int) -> int:
     return parsed if parsed >= 0 else fallback
 
 
-def load_config() -> dict[str, Any]:
-    return {
-        "port": parse_number_env("PORT", 8787),
-        "iis_base_url": os.getenv("IIS_BASE_URL", "https://iis.bsuir.by/api/v1"),
-        "cache_ttl_ms": parse_number_env("CACHE_TTL_MS", 60_000),
-        "stale_ttl_ms": parse_number_env("STALE_TTL_MS", 300_000),
-        "request_timeout_ms": parse_number_env("REQUEST_TIMEOUT_MS", 10_000),
-        "max_retries": parse_number_env("MAX_RETRIES", 2),
-        "retry_delay_ms": parse_number_env("RETRY_DELAY_MS", 250),
-    }
+def load_config() -> AppConfig:
+    return AppConfig(
+        port=parse_number_env("PORT", 8787),
+        iis_base_url=os.getenv("IIS_BASE_URL", "https://iis.bsuir.by/api/v1"),
+        cache_ttl_ms=parse_number_env("CACHE_TTL_MS", 60_000),
+        stale_ttl_ms=parse_number_env("STALE_TTL_MS", 300_000),
+        request_timeout_ms=parse_number_env("REQUEST_TIMEOUT_MS", 10_000),
+        max_retries=parse_number_env("MAX_RETRIES", 2),
+        retry_delay_ms=parse_number_env("RETRY_DELAY_MS", 250),
+    )
 
 
 CONFIG = load_config()
 
 
+def coerce_config(config: AppConfig | Mapping[str, Any] | None) -> AppConfig:
+    if config is None:
+        return CONFIG
+
+    if isinstance(config, AppConfig):
+        return config
+
+    merged_config = {
+        "port": CONFIG.port,
+        "iis_base_url": CONFIG.iis_base_url,
+        "cache_ttl_ms": CONFIG.cache_ttl_ms,
+        "stale_ttl_ms": CONFIG.stale_ttl_ms,
+        "request_timeout_ms": CONFIG.request_timeout_ms,
+        "max_retries": CONFIG.max_retries,
+        "retry_delay_ms": CONFIG.retry_delay_ms,
+    }
+    merged_config.update(config)
+
+    return AppConfig.from_mapping(merged_config)
+
+
 @dataclass(frozen=True)
 class RouteConfig:
     kind: str
-    upstream_path: str
+    cache_namespace: str
     query_param: str
     min_length: int
+
+
+ROUTE_CONFIGS = {
+    "/api/schedule": RouteConfig(
+        kind="schedule",
+        cache_namespace="/schedule",
+        query_param="studentGroup",
+        min_length=1,
+    ),
+    "/api/grades": RouteConfig(
+        kind="grades",
+        cache_namespace="/grades",
+        query_param="studentCardNumber",
+        min_length=1,
+    ),
+    "/api/employees": RouteConfig(
+        kind="employees",
+        cache_namespace="/employees",
+        query_param="q",
+        min_length=2,
+    ),
+}
 
 
 @dataclass
@@ -147,31 +213,7 @@ def write_cache(
 
 
 def route_config(pathname: str) -> RouteConfig | None:
-    if pathname == "/api/schedule":
-        return RouteConfig(
-            kind="schedule",
-            upstream_path="/schedule",
-            query_param="studentGroup",
-            min_length=1,
-        )
-
-    if pathname == "/api/grades":
-        return RouteConfig(
-            kind="grades",
-            upstream_path="/grades",
-            query_param="studentCardNumber",
-            min_length=1,
-        )
-
-    if pathname == "/api/employees":
-        return RouteConfig(
-            kind="employees",
-            upstream_path="/employees",
-            query_param="q",
-            min_length=2,
-        )
-
-    return None
+    return ROUTE_CONFIGS.get(pathname)
 
 
 def should_retry(error: UpstreamRequestError) -> bool:
@@ -196,9 +238,9 @@ def extract_error_message(raw_body: bytes) -> str:
     return "Upstream API request failed"
 
 
-def create_fetcher(config: dict[str, Any]) -> Fetcher:
-    base_url = str(config["iis_base_url"]).rstrip("/")
-    timeout_seconds = max(int(config["request_timeout_ms"]), 1) / 1000
+def create_fetcher(config: AppConfig) -> Fetcher:
+    base_url = config.iis_base_url.rstrip("/")
+    timeout_seconds = max(config.request_timeout_ms, 1) / 1000
 
     def fetch(path: str, params: dict[str, str]) -> JsonValue:
         query = urlencode(params)
@@ -354,7 +396,7 @@ def normalize_schedule_lesson(
     subject = first_non_empty_string(
         raw_lesson.get("subjectFullName"),
         raw_lesson.get("subject"),
-    ) or "Discipline"
+    ) or "Дисциплина"
 
     employees = raw_lesson.get("employees")
     teacher = None
@@ -437,7 +479,7 @@ def normalize_schedule_response(
 
 def normalize_employees_response(
     payload: Any,
-    config: dict[str, Any],
+    config: AppConfig | Mapping[str, Any],
 ) -> list[dict[str, Any]]:
     items = payload
     if isinstance(payload, dict):
@@ -446,14 +488,14 @@ def normalize_employees_response(
     if not isinstance(items, list):
         return []
 
-    base_url = str(config["iis_base_url"]).rstrip("/")
+    base_url = coerce_config(config).iis_base_url.rstrip("/")
     result = []
 
     for item in items:
         if not isinstance(item, dict):
             continue
 
-        full_name = compose_full_name(item) or "Teacher"
+        full_name = compose_full_name(item) or "Преподаватель"
         employee_id = item.get("id")
         avatar_url = first_non_empty_string(item.get("photoLink"))
 
@@ -565,7 +607,7 @@ def extract_grade_subjects(payload: Any) -> list[dict[str, Any]]:
             item.get("discipline"),
             item.get("disciplineName"),
             item.get("title"),
-        ) or "Discipline"
+        ) or "Дисциплина"
 
         raw_marks = (
             item.get("marks")
@@ -665,19 +707,25 @@ class BackendApp:
     def __init__(
         self,
         *,
-        config: dict[str, Any] | None = None,
+        config: AppConfig | Mapping[str, Any] | None = None,
         store: dict[str, CacheEntry] | None = None,
         fetcher: Fetcher | None = None,
         now_ms: NowFn | None = None,
         today: TodayFn | None = None,
     ) -> None:
-        self.config = dict(CONFIG if config is None else config)
+        self.config = self._resolve_config(config)
         self.store = {} if store is None else store
         self.fetcher = fetcher or create_fetcher(self.config)
         self.now_ms = now_ms or (lambda: int(time.time() * 1000))
         self.today = today or (lambda: datetime.now().date())
         self.started_at_ms = self.now_ms()
         self.lock = Lock()
+
+    @staticmethod
+    def _resolve_config(
+        config: AppConfig | Mapping[str, Any] | None,
+    ) -> AppConfig:
+        return coerce_config(config)
 
     def cache_entries(self) -> int:
         with self.lock:
@@ -688,63 +736,86 @@ class BackendApp:
             self.fetcher,
             path,
             params,
-            int(self.config["max_retries"]),
-            int(self.config["retry_delay_ms"]),
+            self.config.max_retries,
+            self.config.retry_delay_ms,
+        )
+
+    def _build_schedule_payload(self, query_value: str) -> JsonValue:
+        schedule_payload = self.request_upstream(
+            "/schedule",
+            {"studentGroup": query_value},
+        )
+        current_week = normalize_current_week(
+            self.request_upstream("/schedule/current-week", {})
+        )
+
+        return normalize_schedule_response(
+            schedule_payload,
+            current_week,
+            self.today(),
+        )
+
+    def _build_employees_payload(self, query_value: str) -> JsonValue:
+        employees_payload = self.request_upstream(
+            "/employees/fio",
+            {"employee-fio": query_value},
+        )
+        return normalize_employees_response(employees_payload, self.config)
+
+    def _build_grades_payload(self, query_value: str) -> JsonValue:
+        search_payload = None
+        rating_payload = None
+        last_error: UpstreamRequestError | None = None
+
+        try:
+            search_payload = self.request_upstream(
+                "/rating/studentSearch",
+                {"studentCardNumber": query_value},
+            )
+        except UpstreamRequestError as error:
+            last_error = error
+
+        try:
+            rating_payload = self.request_upstream(
+                "/rating/studentRating",
+                {"studentCardNumber": query_value},
+            )
+        except UpstreamRequestError as error:
+            last_error = error
+
+        if search_payload is None and rating_payload is None and last_error is not None:
+            raise last_error
+
+        return normalize_grades_response(
+            query_value,
+            search_payload,
+            rating_payload,
         )
 
     def build_route_payload(self, route: RouteConfig, query_value: str) -> JsonValue:
         if route.kind == "schedule":
-            schedule_payload = self.request_upstream(
-                "/schedule",
-                {"studentGroup": query_value},
-            )
-            current_week = normalize_current_week(
-                self.request_upstream("/schedule/current-week", {})
-            )
-            return normalize_schedule_response(
-                schedule_payload,
-                current_week,
-                self.today(),
-            )
+            return self._build_schedule_payload(query_value)
 
         if route.kind == "employees":
-            employees_payload = self.request_upstream(
-                "/employees/fio",
-                {"employee-fio": query_value},
-            )
-            return normalize_employees_response(employees_payload, self.config)
+            return self._build_employees_payload(query_value)
 
         if route.kind == "grades":
-            search_payload = None
-            rating_payload = None
-            last_error: UpstreamRequestError | None = None
-
-            try:
-                search_payload = self.request_upstream(
-                    "/rating/studentSearch",
-                    {"studentCardNumber": query_value},
-                )
-            except UpstreamRequestError as error:
-                last_error = error
-
-            try:
-                rating_payload = self.request_upstream(
-                    "/rating/studentRating",
-                    {"studentCardNumber": query_value},
-                )
-            except UpstreamRequestError as error:
-                last_error = error
-
-            if search_payload is None and rating_payload is None and last_error is not None:
-                raise last_error
-
-            return normalize_grades_response(
-                query_value,
-                search_payload,
-                rating_payload,
-            )
+            return self._build_grades_payload(query_value)
 
         raise UpstreamRequestError("Unsupported route", status=500)
+
+    @staticmethod
+    def _extract_query_value(parsed_url: Any, route: RouteConfig) -> str | None:
+        query_value = parse_qs(parsed_url.query).get(route.query_param, [None])[0]
+
+        if query_value is None:
+            return None
+
+        normalized = query_value.strip()
+        if len(normalized) < route.min_length:
+            return None
+
+        return normalized
 
     def handle_request(self, method: str, raw_path: str | None) -> Response:
         if raw_path is None:
@@ -764,7 +835,7 @@ class BackendApp:
                 {
                     "ok": True,
                     "service": "front_tg_backend_python",
-                    "iisBaseUrl": self.config["iis_base_url"],
+                    "iisBaseUrl": self.config.iis_base_url,
                     "uptimeMs": self.now_ms() - self.started_at_ms,
                     "cacheEntries": self.cache_entries(),
                 },
@@ -775,17 +846,16 @@ class BackendApp:
         if route is None:
             return Response(404, {"error": "Not found"})
 
-        query_value = parse_qs(parsed_url.query).get(route.query_param, [None])[0]
+        normalized = self._extract_query_value(parsed_url, route)
 
-        if query_value is None or len(query_value.strip()) < route.min_length:
+        if normalized is None:
             return Response(
                 400,
                 {"error": f'Query param "{route.query_param}" is required'},
             )
 
-        normalized = query_value.strip()
         params = {route.query_param: normalized}
-        key = cache_key(route.upstream_path, params)
+        key = cache_key(route.cache_namespace, params)
         now_value = self.now_ms()
 
         with self.lock:
@@ -802,8 +872,8 @@ class BackendApp:
                     self.store,
                     key,
                     payload,
-                    int(self.config["cache_ttl_ms"]),
-                    int(self.config["stale_ttl_ms"]),
+                    self.config.cache_ttl_ms,
+                    self.config.stale_ttl_ms,
                     self.now_ms(),
                 )
 
@@ -880,11 +950,11 @@ def create_handler(app: BackendApp) -> type[BaseHTTPRequestHandler]:
 def run_server() -> None:
     app = BackendApp()
     server = ThreadingHTTPServer(
-        ("127.0.0.1", int(app.config["port"])),
+        ("127.0.0.1", app.config.port),
         create_handler(app),
     )
 
-    print(f"[backend:python] listening on http://127.0.0.1:{app.config['port']}")
+    print(f"[backend:python] listening on http://127.0.0.1:{app.config.port}")
 
     try:
         server.serve_forever()

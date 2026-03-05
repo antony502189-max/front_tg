@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { toDateKey } from '../utils/date'
 
 export type LessonType = 'lecture' | 'practice' | 'lab' | 'other'
 
@@ -30,38 +31,26 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
   error: null,
   lessonsByDate: {},
   setLoading: (isLoading) => {
-    set((state) => ({
-      ...state,
-      isLoading,
-    }))
+    set({ isLoading })
   },
   setError: (error) => {
-    set((state) => ({
-      ...state,
-      error,
-    }))
+    set({ error })
   },
   setSchedule: (days) => {
-    set((state) => ({
-      ...state,
+    set({
       lessonsByDate: Object.fromEntries(
         days.map((day) => [day.date, day.lessons]),
       ),
-    }))
+    })
   },
   clearSchedule: () => {
-    set((state) => ({
-      ...state,
-      lessonsByDate: {},
-    }))
+    set({ lessonsByDate: {} })
   },
   getLessonsForDate: (date) => {
     return get().lessonsByDate[date] ?? []
   },
   getTodayLessons: () => {
-    const today = new Date()
-    const dateKey = today.toISOString().slice(0, 10)
-    return get().getLessonsForDate(dateKey)
+    return get().getLessonsForDate(toDateKey(new Date()))
   },
 }))
 

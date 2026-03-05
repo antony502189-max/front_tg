@@ -5,28 +5,14 @@ import { CalendarStrip } from '../components/schedule/CalendarStrip'
 import { LessonCard } from '../components/schedule/LessonCard'
 import { useScheduleStore, type Lesson } from '../store/scheduleStore'
 import { useUserStore } from '../store/userStore'
-
-const getTodayKey = () => new Date().toISOString().slice(0, 10)
-
-const buildDateTime = (date: string, time: string): Date | null => {
-  if (!date || !time) return null
-  const [hour, minute] = time.split(':')
-  if (!hour || !minute) return null
-
-  const result = new Date(date)
-  if (Number.isNaN(result.getTime())) {
-    return null
-  }
-
-  result.setHours(Number(hour), Number(minute), 0, 0)
-  return result
-}
+import { buildDateTime, toDateKey } from '../utils/date'
 
 const findCurrentAndNextLesson = (
   date: string,
   lessons: Lesson[],
+  todayKey: string,
 ): { currentId: string | null; nextId: string | null } => {
-  if (!lessons.length) {
+  if (!lessons.length || date !== todayKey) {
     return { currentId: null, nextId: null }
   }
 
@@ -63,6 +49,7 @@ const findCurrentAndNextLesson = (
 
 export const SchedulePage = () => {
   const groupNumber = useUserStore((state) => state.groupNumber)
+  const normalizedGroupNumber = groupNumber?.trim() ?? ''
 
   const isLoading = useScheduleStore((state) => state.isLoading)
   const error = useScheduleStore((state) => state.error)
@@ -71,7 +58,9 @@ export const SchedulePage = () => {
   const setSchedule = useScheduleStore((state) => state.setSchedule)
   const clearSchedule = useScheduleStore((state) => state.clearSchedule)
 
-  const [selectedDate, setSelectedDate] = useState<string>(getTodayKey)
+  const [selectedDate, setSelectedDate] = useState<string>(() =>
+    toDateKey(new Date()),
+  )
   const [week, setWeek] = useState<WeekSchedule | null>(null)
   const [reloadToken, setReloadToken] = useState(0)
 
@@ -80,7 +69,7 @@ export const SchedulePage = () => {
   )
 
   useEffect(() => {
-    if (!groupNumber) {
+    if (!normalizedGroupNumber) {
       setWeek(null)
       clearSchedule()
       setLoading(false)
@@ -95,7 +84,7 @@ export const SchedulePage = () => {
     setLoading(true)
     setError(null)
 
-    fetchStudentSchedule(groupNumber)
+    fetchStudentSchedule(normalizedGroupNumber)
       .then((data) => {
         if (isCancelled) return
 
@@ -127,7 +116,7 @@ export const SchedulePage = () => {
       isCancelled = true
     }
   }, [
-    groupNumber,
+    normalizedGroupNumber,
     reloadToken,
     clearSchedule,
     setError,
@@ -135,11 +124,16 @@ export const SchedulePage = () => {
     setSchedule,
   ])
 
-  const todayKey = getTodayKey()
+  const todayKey = toDateKey(new Date())
 
   const { currentId, nextId } = useMemo(
-    () => findCurrentAndNextLesson(selectedDate, lessonsForSelectedDate),
-    [lessonsForSelectedDate, selectedDate],
+    () =>
+      findCurrentAndNextLesson(
+        selectedDate,
+        lessonsForSelectedDate,
+        todayKey,
+      ),
+    [lessonsForSelectedDate, selectedDate, todayKey],
   )
 
   const handleRetry = () => {
@@ -184,7 +178,7 @@ export const SchedulePage = () => {
         {!isLoading && error && (
           <div className="schedule-error-card">
             <p className="schedule-error-text">{error}</p>
-            {groupNumber && (
+            {normalizedGroupNumber && (
               <button
                 type="button"
                 className="schedule-retry-button"

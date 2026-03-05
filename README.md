@@ -1,54 +1,74 @@
-# Frontend для Telegram Mini App
+# Telegram Mini App для БГУИР
 
-Этот репозиторий содержит фронтенд (React + TypeScript + Vite) и backend-прокси для Telegram Mini App. Основной локальный backend теперь реализован на Python.
+Это проект Telegram Mini App на React + Vite с backend на Python.
 
-## Нужен ли отдельный backend?
+Фронтенд отвечает за интерфейс, а backend берет на себя работу с IIS БГУИР:
+- ходит в `https://iis.bsuir.by/api/v1`;
+- кэширует ответы;
+- делает retry на временные ошибки;
+- приводит ответы к формату, который ожидает интерфейс.
 
-Короткий ответ: **зависит от задач**, но для production обычно backend нужен.
+Идея простая: фронт не должен знать детали внешнего API. Он работает только со своим стабильным `/api`.
 
-### Когда можно без backend
+## Как это работает
 
-Если API `https://iis.bsuir.by/api`:
-- доступен из браузера,
-- корректно настроен по CORS,
-- не требует хранения секретов,
-- и вам хватает простого чтения данных,
+Схема такая:
 
-то фронтенд может ходить в него напрямую.
+`Telegram Mini App -> Python backend -> IIS BSUIR API`
 
-### Когда backend обязателен (рекомендуется)
+Backend поднимается локально на `http://localhost:8787`, а Vite в dev-режиме проксирует туда запросы с `/api`.
 
-Делайте backend-прокси между фронтом и `https://iis.bsuir.by/api`, если нужно:
-- хранить секреты/токены (нельзя держать в клиенте),
-- централизованно кэшировать данные и снижать нагрузку,
-- добавить бизнес-логику и валидацию,
-- унифицировать обработку ошибок и ретраи,
-- логировать запросы/метрики,
-- избегать проблем CORS и ограничений стороннего API.
+## Структура проекта
 
-## Рекомендуемая схема
+```text
+.
+|-- backend
+|   |-- server.py
+|   |-- server_test.py
+|   `-- __init__.py
+|-- public
+|-- src
+|   |-- api
+|   |-- assets
+|   |-- components
+|   |-- hooks
+|   |-- layouts
+|   |-- mocks
+|   |-- pages
+|   |-- store
+|   `-- telegram
+|-- .env.example
+|-- index.html
+|-- package.json
+|-- postcss.config.cjs
+|-- tailwind.config.cjs
+|-- tsconfig.json
+`-- vite.config.ts
+```
 
-`Telegram Mini App (frontend) -> ваш backend -> https://iis.bsuir.by/api`
+Что где лежит:
+- `src/` — весь frontend.
+- `backend/` — весь backend на Python.
+- корневые конфиги остаются в корне, потому что их так ожидают Vite, TypeScript и npm.
 
-Так фронтенд остается «тонким», а интеграция с внешним API становится управляемой и безопасной.
+## Backend API
 
-## Что уже реализовано в backend
-
-`backend_server.py` поднимает API на `http://localhost:8787` и нормализует ответы IIS под контракт фронтенда:
+Локальный backend отдает:
 - `GET /api/health`
 - `GET /api/schedule?studentGroup=...`
 - `GET /api/grades?studentCardNumber=...`
 - `GET /api/employees?q=...`
 
-Функции backend:
-- проксирование запросов к IIS API,
-- валидация query-параметров,
-- retry на сетевые/5xx/429 ошибки,
-- in-memory cache по URL+query,
-- stale-cache fallback (если upstream временно недоступен, возвращается устаревший кэш).
+Что он делает внутри:
+- валидирует параметры;
+- делает retry на сетевые ошибки и `5xx/429`;
+- использует in-memory cache;
+- возвращает stale cache, если upstream временно недоступен;
+- нормализует ответы IIS под frontend.
 
-Актуальный upstream base URL: `https://iis.bsuir.by/api/v1`.
-Официальный swagger IIS API доступен по адресу `https://iis.bsuir.by/api/v1/swagger`.
+Актуальный upstream:
+- base URL: `https://iis.bsuir.by/api/v1`
+- swagger: `https://iis.bsuir.by/api/v1/swagger`
 
 ## Быстрый старт
 
@@ -56,18 +76,26 @@
 npm install
 npm run dev:backend
 npm run dev
+```
 
-# backend smoke/unit checks
+Проверка backend:
+
+```bash
 npm run test:backend
 ```
 
-По умолчанию фронтенд использует `VITE_API_BASE_URL=/api`, а Vite проксирует `/api` на `http://localhost:8787`.
+## Переменные окружения
 
-## Дополнительно
+Смотри `.env.example`. Основные настройки:
+- `VITE_API_BASE_URL`
+- `PORT`
+- `IIS_BASE_URL`
+- `CACHE_TTL_MS`
+- `STALE_TTL_MS`
+- `REQUEST_TIMEOUT_MS`
+- `MAX_RETRIES`
+- `RETRY_DELAY_MS`
 
-Если нужен прежний Node-вариант backend, он сохранен в `backend.server.mjs`:
+## Коротко по сути
 
-```bash
-npm run dev:backend:node
-npm run test:backend:node
-```
+Сейчас backend в проекте один и он полностью на Python. Node-вариант из репозитория убран.
