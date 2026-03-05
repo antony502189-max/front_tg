@@ -1,0 +1,224 @@
+import { useEffect, useMemo, useState } from 'react'
+import type { WeekSchedule } from '../api/schedule'
+import { fetchStudentSchedule } from '../api/schedule'
+import { CalendarStrip } from '../components/schedule/CalendarStrip'
+import { LessonCard } from '../components/schedule/LessonCard'
+import { useScheduleStore, type Lesson } from '../store/scheduleStore'
+import { useUserStore } from '../store/userStore'
+
+const getTodayKey = () => new Date().toISOString().slice(0, 10)
+
+const buildDateTime = (date: string, time: string): Date | null => {
+  if (!date || !time) return null
+  const [hour, minute] = time.split(':')
+  if (!hour || !minute) return null
+
+  const result = new Date(date)
+  if (Number.isNaN(result.getTime())) {
+    return null
+  }
+
+  result.setHours(Number(hour), Number(minute), 0, 0)
+  return result
+}
+
+const findCurrentAndNextLesson = (
+  date: string,
+  lessons: Lesson[],
+): { currentId: string | null; nextId: string | null } => {
+  if (!lessons.length) {
+    return { currentId: null, nextId: null }
+  }
+
+  const sorted = [...lessons].sort((a, b) =>
+    a.startTime.localeCompare(b.startTime),
+  )
+
+  const now = new Date()
+
+  let currentId: string | null = null
+  let nextId: string | null = null
+
+  for (const lesson of sorted) {
+    const start = buildDateTime(date, lesson.startTime)
+    const end = buildDateTime(date, lesson.endTime)
+
+    if (!start || !end) {
+      // Skip lessons with invalid time
+      // eslint-disable-next-line no-continue
+      continue
+    }
+
+    if (now >= start && now <= end) {
+      currentId = lesson.id
+      break
+    }
+
+    if (now < start) {
+      nextId = lesson.id
+      break
+    }
+  }
+
+  return { currentId, nextId }
+}
+
+export const SchedulePage = () => {
+  const groupNumber = useUserStore((state) => state.groupNumber)
+
+  const isLoading = useScheduleStore((state) => state.isLoading)
+  const error = useScheduleStore((state) => state.error)
+  const setLoading = useScheduleStore((state) => state.setLoading)
+  const setError = useScheduleStore((state) => state.setError)
+  const setScheduleForDate = useScheduleStore(
+    (state) => state.setScheduleForDate,
+  )
+
+  const [selectedDate, setSelectedDate] = useState<string>(getTodayKey)
+  const [week, setWeek] = useState<WeekSchedule | null>(null)
+  const [reloadToken, setReloadToken] = useState(0)
+
+  const lessonsForSelectedDate = useScheduleStore((state) =>
+    state.getLessonsForDate(selectedDate),
+  )
+
+  useEffect(() => {
+    if (!groupNumber) {
+      setError(
+        'Добавьте учебную группу в настройках, чтобы видеть расписание.',
+      )
+      return
+    }
+
+    let isCancelled = false
+
+    setLoading(true)
+    setError(null)
+
+    fetchStudentSchedule(groupNumber)
+      .then((data) => {
+        if (isCancelled) return
+
+        setWeek(data)
+
+        data.days.forEach((day) => {
+          setScheduleForDate(day.date, day.lessons)
+        })
+
+        if (
+          !data.days.some((day) => day.date === selectedDate) &&
+          data.days.length > 0
+        ) {
+          setSelectedDate(data.days[0]?.date)
+        }
+
+        setLoading(false)
+      })
+      .catch(() => {
+        if (isCancelled) return
+
+        setError('Не удалось загрузить расписание.')
+        setLoading(false)
+      })
+
+    return () => {
+      isCancelled = true
+    }
+  }, [groupNumber, reloadToken])
+
+  const todayKey = getTodayKey()
+
+  const { currentId, nextId } = useMemo(
+    () => findCurrentAndNextLesson(selectedDate, lessonsForSelectedDate),
+    [lessonsForSelectedDate, selectedDate],
+  )
+
+  const handleRetry = () => {
+    setReloadToken((token) => token + 1)
+  }
+
+  const handleSelectDate = (date: string) => {
+    setSelectedDate(date)
+  }
+
+  const hasLessons = lessonsForSelectedDate.length > 0
+  const calendarDays = week?.days ?? []
+
+  return (
+    <div className="planner-page">
+      <div className="schedule-inner">
+        <header className="schedule-header">
+          <div>
+            <h1 className="planner-title">Расписание</h1>
+            <p className="planner-subtitle">
+              Смотрите пары на выбранный день и текущую
+              неделю.
+            </p>
+          </div>
+        </header>
+
+        {calendarDays.length > 0 && (
+          <CalendarStrip
+            days={calendarDays}
+            selectedDate={selectedDate}
+            onSelectDate={handleSelectDate}
+          />
+        )}
+
+        {isLoading && (
+          <div className="schedule-skeleton-list">
+            <div className="schedule-skeleton-card" />
+            <div className="schedule-skeleton-card" />
+          </div>
+        )}
+
+        {!isLoading && error && (
+          <div className="schedule-error-card">
+            <p className="schedule-error-text">{error}</p>
+            {groupNumber && (
+              <button
+                type="button"
+                className="schedule-retry-button"
+                onClick={handleRetry}
+              >
+                Повторить попытку
+              </button>
+            )}
+          </div>
+        )}
+
+        {!isLoading && !error && (
+          <section className="schedule-lessons-section">
+            <h2 className="schedule-section-title">
+              {selectedDate === todayKey
+                ? 'Занятия на сегодня'
+                : 'Занятия на выбранный день'}
+            </h2>
+
+            {hasLessons ? (
+              <div className="schedule-lessons-list">
+                {lessonsForSelectedDate.map((lesson) => (
+                  <LessonCard
+                    key={lesson.id}
+                    lesson={lesson}
+                    isCurrent={lesson.id === currentId}
+                    isNext={lesson.id === nextId}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="schedule-empty-card">
+                <h3 className="schedule-empty-title">
+                  Пар нет
+                </h3>
+                <p className="schedule-empty-subtitle">
+                  На этот день занятий не запланировано.
+                </p>
+              </div>
+            )}
+          </section>
+        )}
+      </div>
+    </div>
+  )
+}
