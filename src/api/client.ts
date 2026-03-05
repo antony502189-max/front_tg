@@ -1,7 +1,9 @@
 import axios from 'axios'
 
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? '/api'
+
 export const apiClient = axios.create({
-  baseURL: 'https://iis.bsuir.by/api',
+  baseURL: apiBaseUrl,
   timeout: 10000,
 })
 
@@ -16,4 +18,3 @@ apiClient.interceptors.response.use(
     return Promise.reject(error)
   },
 )
-
