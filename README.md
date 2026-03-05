@@ -1,73 +1,92 @@
-# React + TypeScript + Vite
+# Telegram Mini App Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Привет! Это фронтенд моего Telegram Mini App для учебных сценариев: расписание, учеба, планировщик задач и быстрый доступ к университетской информации.
 
-Currently, two official plugins are available:
+Проект написан как SPA и оптимизирован под запуск внутри Telegram WebApp.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Что есть в приложении
 
-## React Compiler
+- онбординг пользователя при первом запуске;
+- раздел с планировщиком задач;
+- раздел с учебной статистикой/оценками;
+- расписание занятий;
+- поиск по преподавателям;
+- экран настроек и работа с темой Telegram.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Технологии
 
-## Expanding the ESLint configuration
+Основной стек:
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+- **React 19** — UI;
+- **TypeScript** — типобезопасность;
+- **Vite** — сборка и dev-сервер;
+- **React Router** — маршрутизация внутри приложения;
+- **Zustand** — управление состоянием;
+- **Tailwind CSS** — стили;
+- **Axios** — HTTP-клиент;
+- **@twa-dev/sdk** — интеграция с Telegram Mini App API.
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+Дополнительно используются:
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+- **Framer Motion** для анимаций;
+- **Lucide React** для иконок;
+- **ESLint** для статического анализа кода.
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Структура проекта (кратко)
+
+- `src/pages` — страницы приложения;
+- `src/components` — переиспользуемые UI-компоненты;
+- `src/store` — Zustand-сторы;
+- `src/api` — работа с API;
+- `src/hooks` — кастомные хуки;
+- `src/telegram` — Telegram provider/обертки.
+
+## API и backend
+
+Сейчас фронтенд может работать с `https://iis.bsuir.by/api`, но для production обычно лучше использовать собственный backend-прокси.
+
+Почему это полезно:
+
+- безопаснее (секреты и служебная логика остаются на сервере);
+- проще контролировать ошибки, ретраи и таймауты;
+- можно добавить кэш и снизить нагрузку на внешний API;
+- проще масштабировать и наблюдать за системой.
+
+Подробный пошаговый план backend (с акцентом на **Python/FastAPI** и локальную разработку): [BACKEND_PLAN.md](./BACKEND_PLAN.md).
+
+## Запуск локально (Windows)
+
+> Ниже команды для **Windows PowerShell**.
+
+```powershell
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+По умолчанию Vite поднимется на локальном порту (обычно `5173`).
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Доступные команды (Windows)
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```powershell
+npm run dev      # запуск в режиме разработки
+npm run build    # production-сборка
+npm run preview  # просмотр production-сборки
+npm run lint     # проверка eslint
 ```
+
+## Быстрая настройка backend на Python в Windows (PowerShell)
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -U pip
+pip install fastapi uvicorn[standard] httpx pydantic pydantic-settings
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+---
+
+Если нужно, следующим шагом могу добавить в README:
+- раздел по env-переменным,
+- пример конфигурации API base URL,
+- чек-лист для деплоя frontend + backend.
