@@ -1,6 +1,14 @@
-# Frontend для Telegram Mini App
+# BSUIR Nexus (Telegram Mini App)
 
-Этот репозиторий содержит фронтенд (React + TypeScript + Vite) для Telegram Mini App.
+BSUIR Nexus — цифровой помощник студента БГУИР в формате Telegram Mini App.
+
+## Самое важное
+
+- **Роль проекта:** mobile-first приложение для студентов с 4 вкладками: Планер, Учеба, Расписание, Универ.
+- **Стек:** React + TypeScript + Vite, Tailwind CSS, Zustand, React Router, Axios, Framer Motion, Lucide React, `@twa-dev/sdk`.
+- **Интеграция Telegram:** используем `WebApp.ready()` и тему из `WebApp.themeParams` для адаптации под светлую/темную тему.
+- **API:** `https://iis.bsuir.by/api` (расписание, сотрудники; оценки — через API или моки при ограничениях).
+- **Онбординг:** сохраняем учебную группу (6 цифр) и номер студенческого (8 цифр) в LocalStorage + Zustand.
 
 ## Нужен ли отдельный backend?
 
