@@ -2,18 +2,38 @@ import { createServer } from 'node:http'
 import { URL } from 'node:url'
 import axios from 'axios'
 
-const PORT = Number(process.env.PORT ?? 8787)
-const IIS_BASE_URL = process.env.IIS_BASE_URL ?? 'https://iis.bsuir.by/api'
-const CACHE_TTL_MS = Number(process.env.CACHE_TTL_MS ?? 60_000)
-const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS ?? 10_000)
-const MAX_RETRIES = Number(process.env.MAX_RETRIES ?? 2)
+function parseNumberEnv(name, fallback) {
+  const raw = process.env[name]
+  const parsed = Number(raw)
+
+  if (!raw || !Number.isFinite(parsed) || parsed < 0) {
+    return fallback
+  }
+
+  return parsed
+}
+
+const CONFIG = {
+  port: parseNumberEnv('PORT', 8787),
+  iisBaseUrl: process.env.IIS_BASE_URL ?? 'https://iis.bsuir.by/api',
+  cacheTtlMs: parseNumberEnv('CACHE_TTL_MS', 60_000),
+  staleTtlMs: parseNumberEnv('STALE_TTL_MS', 300_000),
+  requestTimeoutMs: parseNumberEnv('REQUEST_TIMEOUT_MS', 10_000),
+  maxRetries: parseNumberEnv('MAX_RETRIES', 2),
+  retryDelayMs: parseNumberEnv('RETRY_DELAY_MS', 250),
+}
 
 const upstream = axios.create({
-  baseURL: IIS_BASE_URL,
-  timeout: REQUEST_TIMEOUT_MS,
+  baseURL: CONFIG.iisBaseUrl,
+  timeout: CONFIG.requestTimeoutMs,
 })
 
 const cache = new Map()
+const startedAt = Date.now()
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
 
 function sendJson(res, statusCode, payload) {
   res.writeHead(statusCode, {
@@ -36,47 +56,42 @@ function cacheKey(path, params) {
   return `${path}?${serialized}`
 }
 
-function readCache(key) {
-  const item = cache.get(key)
+function readFreshCache(store, key) {
+  const item = store.get(key)
 
   if (!item) {
     return undefined
   }
 
-  if (Date.now() > item.expiresAt) {
-    cache.delete(key)
+  if (Date.now() <= item.freshUntil) {
+    return item.payload
+  }
+
+  return undefined
+}
+
+function readStaleCache(store, key) {
+  const item = store.get(key)
+
+  if (!item) {
     return undefined
   }
 
-  return item.payload
-}
-
-function writeCache(key, payload) {
-  cache.set(key, {
-    payload,
-    expiresAt: Date.now() + CACHE_TTL_MS,
-  })
-}
-
-async function fetchWithRetry(path, params) {
-  let lastError
-
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
-    try {
-      const response = await upstream.get(path, { params })
-      return response.data
-    } catch (error) {
-      lastError = error
-      const status = error.response?.status
-      const shouldRetry = !status || status >= 500
-
-      if (!shouldRetry || attempt === MAX_RETRIES) {
-        throw error
-      }
-    }
+  if (Date.now() <= item.staleUntil) {
+    return item.payload
   }
 
-  throw lastError
+  store.delete(key)
+  return undefined
+}
+
+function writeCache(store, key, payload, cacheTtlMs, staleTtlMs) {
+  const now = Date.now()
+  store.set(key, {
+    payload,
+    freshUntil: now + cacheTtlMs,
+    staleUntil: now + cacheTtlMs + staleTtlMs,
+  })
 }
 
 function routeConfig(pathname) {
@@ -99,74 +114,141 @@ function routeConfig(pathname) {
   return null
 }
 
-createServer(async (req, res) => {
-  if (!req.url) {
-    return sendJson(res, 400, { error: 'Bad request' })
+function shouldRetry(error) {
+  const status = error?.response?.status
+  return !status || status >= 500 || status === 429
+}
+
+async function fetchWithRetry(fetcher, path, params, maxRetries, retryDelayMs) {
+  let lastError
+
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    try {
+      return await fetcher(path, params)
+    } catch (error) {
+      lastError = error
+
+      if (!shouldRetry(error) || attempt === maxRetries) {
+        throw error
+      }
+
+      await sleep(retryDelayMs * (attempt + 1))
+    }
   }
 
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204, {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    })
-    res.end()
-    return
+  throw lastError
+}
+
+function createFetcher(client) {
+  return async (path, params) => {
+    const response = await client.get(path, { params })
+    return response.data
   }
+}
 
-  if (req.method !== 'GET') {
-    return sendJson(res, 405, { error: 'Method not allowed' })
+export function createRequestHandler({
+  config = CONFIG,
+  store = cache,
+  fetcher = createFetcher(upstream),
+  now = () => Date.now(),
+} = {}) {
+  return async (req, res) => {
+    if (!req.url) {
+      return sendJson(res, 400, { error: 'Bad request' })
+    }
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+      })
+      res.end()
+      return
+    }
+
+    if (req.method !== 'GET') {
+      return sendJson(res, 405, { error: 'Method not allowed' })
+    }
+
+    const parsedUrl = new URL(req.url, `http://localhost:${config.port}`)
+
+    if (parsedUrl.pathname === '/api/health') {
+      return sendJson(res, 200, {
+        ok: true,
+        service: 'front_tg_backend',
+        iisBaseUrl: config.iisBaseUrl,
+        uptimeMs: now() - startedAt,
+        cacheEntries: store.size,
+      })
+    }
+
+    const route = routeConfig(parsedUrl.pathname)
+
+    if (!route) {
+      return sendJson(res, 404, { error: 'Not found' })
+    }
+
+    const queryValue = parsedUrl.searchParams.get(route.queryParam)
+
+    if (!queryValue || queryValue.trim().length < route.minLength) {
+      return sendJson(res, 400, {
+        error: `Query param \"${route.queryParam}\" is required`,
+      })
+    }
+
+    const normalized = queryValue.trim()
+    const params = { [route.queryParam]: normalized }
+    const key = cacheKey(route.upstreamPath, params)
+    const cached = readFreshCache(store, key)
+
+    if (cached !== undefined) {
+      return sendJson(res, 200, cached)
+    }
+
+    try {
+      const payload = await fetchWithRetry(
+        fetcher,
+        route.upstreamPath,
+        params,
+        config.maxRetries,
+        config.retryDelayMs,
+      )
+
+      writeCache(
+        store,
+        key,
+        payload,
+        config.cacheTtlMs,
+        config.staleTtlMs,
+      )
+
+      return sendJson(res, 200, payload)
+    } catch (error) {
+      const stalePayload = readStaleCache(store, key)
+
+      if (stalePayload !== undefined) {
+        return sendJson(res, 200, stalePayload)
+      }
+
+      const status = error?.response?.status ?? 502
+      const message =
+        error?.response?.data?.message ??
+        error?.response?.data?.error ??
+        'Upstream API request failed'
+
+      return sendJson(res, status, {
+        error: message,
+        upstreamStatus: error?.response?.status,
+      })
+    }
   }
+}
 
-  const parsedUrl = new URL(req.url, `http://localhost:${PORT}`)
+if (process.env.NODE_ENV !== 'test') {
+  createServer(createRequestHandler()).listen(CONFIG.port, () => {
+    console.log(`[backend] listening on http://localhost:${CONFIG.port}`)
+  })
+}
 
-  if (parsedUrl.pathname === '/api/health') {
-    return sendJson(res, 200, {
-      ok: true,
-      service: 'front_tg_backend',
-      iisBaseUrl: IIS_BASE_URL,
-    })
-  }
-
-  const config = routeConfig(parsedUrl.pathname)
-
-  if (!config) {
-    return sendJson(res, 404, { error: 'Not found' })
-  }
-
-  const queryValue = parsedUrl.searchParams.get(config.queryParam)
-
-  if (!queryValue || queryValue.trim().length < config.minLength) {
-    return sendJson(res, 400, {
-      error: `Query param \"${config.queryParam}\" is required`,
-    })
-  }
-
-  const normalized = queryValue.trim()
-  const params = { [config.queryParam]: normalized }
-  const key = cacheKey(config.upstreamPath, params)
-  const cached = readCache(key)
-
-  if (cached !== undefined) {
-    return sendJson(res, 200, cached)
-  }
-
-  try {
-    const payload = await fetchWithRetry(config.upstreamPath, params)
-    writeCache(key, payload)
-    return sendJson(res, 200, payload)
-  } catch (error) {
-    const status = error.response?.status ?? 502
-    const message =
-      error.response?.data?.message ??
-      error.response?.data?.error ??
-      'Upstream API request failed'
-
-    return sendJson(res, status, {
-      error: message,
-      upstreamStatus: error.response?.status,
-    })
-  }
-}).listen(PORT, () => {
-  console.log(`[backend] listening on http://localhost:${PORT}`)
-})
+export { CONFIG, cacheKey, readFreshCache, readStaleCache, writeCache, fetchWithRetry, routeConfig }

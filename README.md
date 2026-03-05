@@ -43,8 +43,9 @@
 Функции backend:
 - проксирование запросов к IIS API,
 - валидация query-параметров,
-- retry на сетевые/5xx ошибки,
-- in-memory cache по URL+query.
+- retry на сетевые/5xx/429 ошибки,
+- in-memory cache по URL+query,
+- stale-cache fallback (если upstream временно недоступен, возвращается устаревший кэш).
 
 ## Быстрый старт
 
@@ -52,6 +53,9 @@
 npm install
 npm run dev:backend
 npm run dev
+
+# backend smoke/unit checks
+npm run test:backend
 ```
 
 По умолчанию фронтенд использует `VITE_API_BASE_URL=/api`, а Vite проксирует `/api` на `http://localhost:8787`.

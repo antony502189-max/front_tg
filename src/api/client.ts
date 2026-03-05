@@ -11,7 +11,6 @@ apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
       console.error('[API error]', error)
     }
 
