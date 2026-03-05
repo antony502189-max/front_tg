@@ -37,16 +37,17 @@ export const UniversityPage = () => {
 
   useEffect(() => {
     if (debouncedQuery.length < 2) {
-      setResults([])
-      setError(null)
-      setIsLoading(false)
       return
     }
 
     let isCancelled = false
 
-    setIsLoading(true)
-    setError(null)
+    queueMicrotask(() => {
+      if (isCancelled) return
+
+      setIsLoading(true)
+      setError(null)
+    })
 
     searchTeachers(debouncedQuery)
       .then((employees) => {
@@ -70,7 +71,8 @@ export const UniversityPage = () => {
   }, [debouncedQuery, reloadToken])
 
   const hasQuery = debouncedQuery.length >= 2
-  const hasResults = results.length > 0
+  const hasResults = hasQuery && results.length > 0
+  const effectiveIsLoading = hasQuery && isLoading
 
   const handleRetry = () => {
     setReloadToken((token) => token + 1)
@@ -106,14 +108,14 @@ export const UniversityPage = () => {
           </p>
         </section>
 
-        {isLoading && (
+        {effectiveIsLoading && (
           <div className="univer-skeleton-list">
             <div className="univer-skeleton-card" />
             <div className="univer-skeleton-card" />
           </div>
         )}
 
-        {!isLoading && error && (
+        {!effectiveIsLoading && hasQuery && error && (
           <div className="univer-error-card">
             <p className="univer-error-text">{error}</p>
             {hasQuery && (
@@ -128,7 +130,7 @@ export const UniversityPage = () => {
           </div>
         )}
 
-        {!isLoading && !error && (
+        {!effectiveIsLoading && !error && (
           <section className="univer-results-section">
             {hasQuery ? (
               hasResults ? (
@@ -140,7 +142,6 @@ export const UniversityPage = () => {
                     >
                       <div className="univer-teacher-avatar">
                         {employee.avatarUrl ? (
-                          // eslint-disable-next-line jsx-a11y/img-redundant-alt
                           <img
                             src={employee.avatarUrl}
                             alt={`Фото ${employee.fullName}`}

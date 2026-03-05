@@ -61,7 +61,6 @@ const MOCK_GRADES: GradesResponse = {
   ],
 }
 
-export function getMockGrades(_studentCardNumber: string): GradesResponse {
+export function getMockGrades(): GradesResponse {
   return MOCK_GRADES
 }
-

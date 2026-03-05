@@ -23,22 +23,20 @@ export const StudyPage = () => {
 
   useEffect(() => {
     if (!studentCardNumber) {
-      setState({
-        data: null,
-        isLoading: false,
-        error:
-          'Добавьте номер студенческого в настройках, чтобы видеть успеваемость.',
-      })
       return
     }
 
     let isCancelled = false
 
-    setState((prev) => ({
-      ...prev,
-      isLoading: true,
-      error: null,
-    }))
+    queueMicrotask(() => {
+      if (isCancelled) return
+
+      setState((prev) => ({
+        ...prev,
+        isLoading: true,
+        error: null,
+      }))
+    })
 
     fetchGrades(studentCardNumber)
       .then((data) => {
@@ -66,6 +64,11 @@ export const StudyPage = () => {
   }, [studentCardNumber, reloadToken])
 
   const { data, isLoading, error } = state
+  const displayError =
+    error ??
+    (!studentCardNumber
+      ? 'Добавьте номер студенческого в настройках, чтобы видеть успеваемость.'
+      : null)
   const summary = data?.summary
   const subjects = data?.subjects ?? []
   const hasSubjects = subjects.length > 0
@@ -94,9 +97,9 @@ export const StudyPage = () => {
           </div>
         )}
 
-        {!isLoading && error && (
+        {!isLoading && displayError && (
           <div className="study-error-card">
-            <p className="study-error-text">{error}</p>
+            <p className="study-error-text">{displayError}</p>
             {studentCardNumber && (
               <button
                 type="button"
@@ -206,4 +209,3 @@ export const StudyPage = () => {
     </div>
   )
 }
-

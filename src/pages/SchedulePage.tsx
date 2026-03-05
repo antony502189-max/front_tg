@@ -44,8 +44,6 @@ const findCurrentAndNextLesson = (
     const end = buildDateTime(date, lesson.endTime)
 
     if (!start || !end) {
-      // Skip lessons with invalid time
-      // eslint-disable-next-line no-continue
       continue
     }
 
@@ -124,7 +122,14 @@ export const SchedulePage = () => {
     return () => {
       isCancelled = true
     }
-  }, [groupNumber, reloadToken])
+  }, [
+    groupNumber,
+    reloadToken,
+    selectedDate,
+    setError,
+    setLoading,
+    setScheduleForDate,
+  ])
 
   const todayKey = getTodayKey()
 
