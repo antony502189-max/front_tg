@@ -37,19 +37,18 @@ export const UniversityPage = () => {
 
   useEffect(() => {
     if (debouncedQuery.length < 2) {
+      setIsLoading(false)
+      setError(null)
+      setResults([])
       return
     }
 
     let isCancelled = false
 
-    queueMicrotask(() => {
-      if (isCancelled) return
+    setIsLoading(true)
+    setError(null)
 
-      setIsLoading(true)
-      setError(null)
-    })
-
-    searchTeachers(debouncedQuery)
+    void searchTeachers(debouncedQuery)
       .then((employees) => {
         if (isCancelled) return
 
@@ -59,6 +58,7 @@ export const UniversityPage = () => {
       .catch(() => {
         if (isCancelled) return
 
+        setResults([])
         setError(
           'Не удалось загрузить список преподавателей. Попробуйте ещё раз.',
         )

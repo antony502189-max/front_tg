@@ -1,4 +1,3 @@
-import axios from 'axios'
 import { apiClient } from './client'
 import type {
   GradeMark,
@@ -8,20 +7,6 @@ import type {
 import { getMockGrades } from '../mocks/grades'
 
 type RawGradesResponse = unknown
-
-function isAxiosError(error: unknown): error is axios.AxiosError {
-  return axios.isAxiosError(error)
-}
-
-function isAuthOrForbiddenError(error: unknown): boolean {
-  if (!isAxiosError(error)) {
-    return false
-  }
-
-  const status = error.response?.status
-
-  return status === 401 || status === 403
-}
 
 function mapRawGradesResponse(data: RawGradesResponse): GradesResponse {
   if (!data || typeof data !== 'object') {
@@ -144,6 +129,15 @@ function mapRawGradesResponse(data: RawGradesResponse): GradesResponse {
   }
 }
 
+function isNormalizedGradesResponse(data: unknown): data is GradesResponse {
+  return (
+    typeof data === 'object' &&
+    data !== null &&
+    'subjects' in data &&
+    Array.isArray((data as GradesResponse).subjects)
+  )
+}
+
 export async function fetchGrades(
   studentCardNumber: string,
 ): Promise<GradesResponse> {
@@ -152,17 +146,13 @@ export async function fetchGrades(
       params: { studentCardNumber },
     })
 
+    if (isNormalizedGradesResponse(response.data)) {
+      return response.data
+    }
+
     return mapRawGradesResponse(response.data)
-  } catch (error) {
-    if (isAuthOrForbiddenError(error)) {
-      return getMockGrades(studentCardNumber)
-    }
-
-    if (isAxiosError(error)) {
-      return getMockGrades(studentCardNumber)
-    }
-
-    return getMockGrades(studentCardNumber)
+  } catch {
+    return getMockGrades()
   }
 }
 

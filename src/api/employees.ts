@@ -21,6 +21,10 @@ type RawEmployee = {
   [key: string]: unknown
 }
 
+type RawEmployeesEnvelope = {
+  value?: RawEmployee[]
+}
+
 const FALLBACK_EMPLOYEE_NAME = 'Преподаватель'
 
 function buildFullName(raw: RawEmployee): string {
@@ -41,6 +45,19 @@ function buildFullName(raw: RawEmployee): string {
   return FALLBACK_EMPLOYEE_NAME
 }
 
+function isNormalizedEmployeeArray(data: unknown): data is Employee[] {
+  return (
+    Array.isArray(data) &&
+    data.every(
+      (item) =>
+        typeof item === 'object' &&
+        item !== null &&
+        'id' in item &&
+        'fullName' in item,
+    )
+  )
+}
+
 export async function searchTeachers(query: string): Promise<Employee[]> {
   const trimmed = query.trim()
 
@@ -48,11 +65,20 @@ export async function searchTeachers(query: string): Promise<Employee[]> {
     return []
   }
 
-  const response = await apiClient.get<RawEmployee[]>('/employees', {
+  const response = await apiClient.get<unknown>('/employees', {
     params: { q: trimmed },
   })
 
-  const raw = response.data ?? []
+  if (isNormalizedEmployeeArray(response.data)) {
+    return response.data
+  }
+
+  const raw =
+    Array.isArray(response.data)
+      ? (response.data as RawEmployee[])
+      : Array.isArray((response.data as RawEmployeesEnvelope | null)?.value)
+        ? (response.data as RawEmployeesEnvelope).value ?? []
+        : []
 
   return raw.map((employee) => {
     const fullName = buildFullName(employee)

@@ -23,22 +23,23 @@ export const StudyPage = () => {
 
   useEffect(() => {
     if (!studentCardNumber) {
+      setState({
+        data: null,
+        isLoading: false,
+        error: null,
+      })
       return
     }
 
     let isCancelled = false
 
-    queueMicrotask(() => {
-      if (isCancelled) return
+    setState((prev) => ({
+      ...prev,
+      isLoading: true,
+      error: null,
+    }))
 
-      setState((prev) => ({
-        ...prev,
-        isLoading: true,
-        error: null,
-      }))
-    })
-
-    fetchGrades(studentCardNumber)
+    void fetchGrades(studentCardNumber)
       .then((data) => {
         if (isCancelled) return
 

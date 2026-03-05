@@ -19,7 +19,8 @@ type ScheduleState = {
   lessonsByDate: Record<string, Lesson[]>
   setLoading: (isLoading: boolean) => void
   setError: (error: string | null) => void
-  setScheduleForDate: (date: string, lessons: Lesson[]) => void
+  setSchedule: (days: Array<{ date: string; lessons: Lesson[] }>) => void
+  clearSchedule: () => void
   getLessonsForDate: (date: string) => Lesson[]
   getTodayLessons: () => Lesson[]
 }
@@ -40,13 +41,18 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
       error,
     }))
   },
-  setScheduleForDate: (date, lessons) => {
+  setSchedule: (days) => {
     set((state) => ({
       ...state,
-      lessonsByDate: {
-        ...state.lessonsByDate,
-        [date]: lessons,
-      },
+      lessonsByDate: Object.fromEntries(
+        days.map((day) => [day.date, day.lessons]),
+      ),
+    }))
+  },
+  clearSchedule: () => {
+    set((state) => ({
+      ...state,
+      lessonsByDate: {},
     }))
   },
   getLessonsForDate: (date) => {

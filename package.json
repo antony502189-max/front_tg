@@ -8,8 +8,10 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "dev:backend": "node backend.server.mjs",
-    "test:backend": "NODE_ENV=test node --test backend.server.test.mjs"
+    "dev:backend": "python backend_server.py",
+    "dev:backend:node": "node backend.server.mjs",
+    "test:backend": "python -m unittest -v backend_server_test",
+    "test:backend:node": "NODE_ENV=test node --test backend.server.test.mjs"
   },
   "dependencies": {
     "@twa-dev/sdk": "^8.0.2",

@@ -1,6 +1,6 @@
 # Frontend для Telegram Mini App
 
-Этот репозиторий содержит фронтенд (React + TypeScript + Vite) и базовый backend-прокси для Telegram Mini App.
+Этот репозиторий содержит фронтенд (React + TypeScript + Vite) и backend-прокси для Telegram Mini App. Основной локальный backend теперь реализован на Python.
 
 ## Нужен ли отдельный backend?
 
@@ -34,7 +34,7 @@
 
 ## Что уже реализовано в backend
 
-`backend.server.mjs` поднимает API на `http://localhost:8787`:
+`backend_server.py` поднимает API на `http://localhost:8787` и нормализует ответы IIS под контракт фронтенда:
 - `GET /api/health`
 - `GET /api/schedule?studentGroup=...`
 - `GET /api/grades?studentCardNumber=...`
@@ -46,6 +46,9 @@
 - retry на сетевые/5xx/429 ошибки,
 - in-memory cache по URL+query,
 - stale-cache fallback (если upstream временно недоступен, возвращается устаревший кэш).
+
+Актуальный upstream base URL: `https://iis.bsuir.by/api/v1`.
+Официальный swagger IIS API доступен по адресу `https://iis.bsuir.by/api/v1/swagger`.
 
 ## Быстрый старт
 
@@ -59,3 +62,12 @@ npm run test:backend
 ```
 
 По умолчанию фронтенд использует `VITE_API_BASE_URL=/api`, а Vite проксирует `/api` на `http://localhost:8787`.
+
+## Дополнительно
+
+Если нужен прежний Node-вариант backend, он сохранен в `backend.server.mjs`:
+
+```bash
+npm run dev:backend:node
+npm run test:backend:node
+```

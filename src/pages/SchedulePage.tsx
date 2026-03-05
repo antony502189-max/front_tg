@@ -68,9 +68,8 @@ export const SchedulePage = () => {
   const error = useScheduleStore((state) => state.error)
   const setLoading = useScheduleStore((state) => state.setLoading)
   const setError = useScheduleStore((state) => state.setError)
-  const setScheduleForDate = useScheduleStore(
-    (state) => state.setScheduleForDate,
-  )
+  const setSchedule = useScheduleStore((state) => state.setSchedule)
+  const clearSchedule = useScheduleStore((state) => state.clearSchedule)
 
   const [selectedDate, setSelectedDate] = useState<string>(getTodayKey)
   const [week, setWeek] = useState<WeekSchedule | null>(null)
@@ -82,6 +81,9 @@ export const SchedulePage = () => {
 
   useEffect(() => {
     if (!groupNumber) {
+      setWeek(null)
+      clearSchedule()
+      setLoading(false)
       setError(
         'Добавьте учебную группу в настройках, чтобы видеть расписание.',
       )
@@ -98,23 +100,25 @@ export const SchedulePage = () => {
         if (isCancelled) return
 
         setWeek(data)
+        setSchedule(data.days)
+        setSelectedDate((currentSelectedDate) => {
+          if (
+            data.days.some((day) => day.date === currentSelectedDate) ||
+            data.days.length === 0
+          ) {
+            return currentSelectedDate
+          }
 
-        data.days.forEach((day) => {
-          setScheduleForDate(day.date, day.lessons)
+          return data.days[0]?.date ?? currentSelectedDate
         })
-
-        if (
-          !data.days.some((day) => day.date === selectedDate) &&
-          data.days.length > 0
-        ) {
-          setSelectedDate(data.days[0]?.date)
-        }
 
         setLoading(false)
       })
       .catch(() => {
         if (isCancelled) return
 
+        setWeek(null)
+        clearSchedule()
         setError('Не удалось загрузить расписание.')
         setLoading(false)
       })
@@ -125,10 +129,10 @@ export const SchedulePage = () => {
   }, [
     groupNumber,
     reloadToken,
-    selectedDate,
+    clearSchedule,
     setError,
     setLoading,
-    setScheduleForDate,
+    setSchedule,
   ])
 
   const todayKey = getTodayKey()
