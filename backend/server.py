@@ -16,8 +16,24 @@ from urllib.request import Request, urlopen
 
 try:
     from backend.env import load_project_env
+    from backend.telegram_bot import (
+        TelegramBotApp,
+        TelegramBotError,
+        WEBHOOK_PATH,
+        build_webhook_url,
+        load_webhook_config,
+        matches_webhook_secret,
+    )
 except ModuleNotFoundError:  # pragma: no cover - fallback for direct script launch
     from env import load_project_env  # type: ignore
+    from telegram_bot import (  # type: ignore
+        TelegramBotApp,
+        TelegramBotError,
+        WEBHOOK_PATH,
+        build_webhook_url,
+        load_webhook_config,
+        matches_webhook_secret,
+    )
 
 
 load_project_env()
@@ -959,6 +975,7 @@ class BackendApp:
         fetcher: Fetcher | None = None,
         now_ms: NowFn | None = None,
         today: TodayFn | None = None,
+        telegram_bot_app: TelegramBotApp | None = None,
     ) -> None:
         self.config = self._resolve_config(config)
         self.store = {} if store is None else store
@@ -968,6 +985,11 @@ class BackendApp:
         self.today = today or (lambda: datetime.now().date())
         self.started_at_ms = self.now_ms()
         self.lock = Lock()
+        self.telegram_bot_app = (
+            telegram_bot_app
+            if telegram_bot_app is not None
+            else self._build_telegram_bot_app()
+        )
 
     @staticmethod
     def _resolve_config(
@@ -975,9 +997,31 @@ class BackendApp:
     ) -> AppConfig:
         return coerce_config(config)
 
+    @staticmethod
+    def _build_telegram_bot_app() -> TelegramBotApp | None:
+        config = load_webhook_config()
+
+        if config is None:
+            return None
+
+        return TelegramBotApp(config)
+
     def cache_entries(self) -> int:
         with self.lock:
             return len(self.store)
+
+    def configure_telegram_webhook(self) -> None:
+        if self.telegram_bot_app is None or self.telegram_bot_app.is_configured:
+            return
+
+        try:
+            self.telegram_bot_app.ensure_webhook_setup()
+            print(
+                "[telegram-webhook] configured at "
+                f"{build_webhook_url(self.telegram_bot_app.config)}"
+            )
+        except TelegramBotError as error:
+            print(f"[telegram-webhook] setup error: {error.message}")
 
     def request_upstream(self, path: str, params: dict[str, str]) -> JsonValue:
         return fetch_with_retry(
@@ -1142,28 +1186,77 @@ class BackendApp:
 
         return normalized
 
-    def handle_request(self, method: str, raw_path: str | None) -> Response:
+    def _handle_telegram_webhook(
+        self,
+        body: bytes,
+        headers: Mapping[str, str] | None,
+    ) -> Response:
+        if self.telegram_bot_app is None:
+            return Response(404, {"error": "Not found"})
+
+        normalized_headers = {
+            str(key).lower(): str(value)
+            for key, value in (headers or {}).items()
+        }
+
+        if not matches_webhook_secret(
+            normalized_headers,
+            self.telegram_bot_app.config.webhook_secret,
+        ):
+            return Response(403, {"error": "Forbidden"})
+
+        try:
+            payload = json.loads(body.decode("utf-8")) if body else None
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return Response(400, {"error": "Invalid JSON"})
+
+        if not isinstance(payload, dict):
+            return Response(400, {"error": "Invalid Telegram update"})
+
+        try:
+            self.telegram_bot_app.handle_update(payload)
+        except TelegramBotError as error:
+            return Response(502, {"error": error.message})
+
+        return Response(200, {"ok": True})
+
+    def handle_request(
+        self,
+        method: str,
+        raw_path: str | None,
+        *,
+        body: bytes | None = None,
+        headers: Mapping[str, str] | None = None,
+    ) -> Response:
         if raw_path is None:
             return Response(400, {"error": "Bad request"})
+
+        parsed_url = urlparse(raw_path)
 
         if method == "OPTIONS":
             return Response(204)
 
+        if parsed_url.path == WEBHOOK_PATH:
+            if method != "POST":
+                return Response(405, {"error": "Method not allowed"})
+
+            return self._handle_telegram_webhook(body or b"", headers)
+
         if method not in {"GET", "HEAD"}:
             return Response(405, {"error": "Method not allowed"})
 
-        parsed_url = urlparse(raw_path)
-
         if parsed_url.path == "/":
-            return Response(
-                200,
-                {
-                    "ok": True,
-                    "service": "front_tg_backend_python",
-                    "message": "Backend is running. Use /api/health or /api/* endpoints.",
-                    "healthPath": "/api/health",
-                },
-            )
+            payload: dict[str, Any] = {
+                "ok": True,
+                "service": "front_tg_backend_python",
+                "message": "Backend is running. Use /api/health or /api/* endpoints.",
+                "healthPath": "/api/health",
+            }
+
+            if self.telegram_bot_app is not None:
+                payload["telegramWebhookPath"] = WEBHOOK_PATH
+
+            return Response(200, payload)
 
         if parsed_url.path == "/api/health":
             return Response(
@@ -1229,7 +1322,7 @@ class BackendApp:
 
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
 }
 
@@ -1273,13 +1366,39 @@ def encode_response_body(response: Response) -> bytes:
     return json.dumps(response.payload, ensure_ascii=False).encode("utf-8")
 
 
-async def drain_request_body(receive: Any) -> None:
+def build_headers_from_scope(scope: Mapping[str, Any]) -> dict[str, str]:
+    raw_headers = scope.get("headers") or []
+    headers: dict[str, str] = {}
+
+    if not isinstance(raw_headers, list):
+        return headers
+
+    for key, value in raw_headers:
+        if not isinstance(key, bytes) or not isinstance(value, bytes):
+            continue
+
+        headers[key.decode("utf-8", errors="ignore").lower()] = value.decode(
+            "utf-8",
+            errors="ignore",
+        )
+
+    return headers
+
+
+async def read_request_body(receive: Any) -> bytes:
+    chunks: list[bytes] = []
+
     while True:
         message = await receive()
         if message.get("type") != "http.request":
-            return
+            return b"".join(chunks)
+
+        body = message.get("body", b"")
+        if isinstance(body, bytes) and body:
+            chunks.append(body)
+
         if not message.get("more_body", False):
-            return
+            return b"".join(chunks)
 
 
 class BackendASGIApp:
@@ -1293,6 +1412,7 @@ class BackendASGIApp:
             message_type = message.get("type")
 
             if message_type == "lifespan.startup":
+                self.backend_app.configure_telegram_webhook()
                 await send({"type": "lifespan.startup.complete"})
                 continue
 
@@ -1310,12 +1430,14 @@ class BackendASGIApp:
         if scope_type != "http":
             return
 
-        await drain_request_body(receive)
+        body_bytes = await read_request_body(receive)
 
         method = str(scope.get("method") or "GET")
         response = self.backend_app.handle_request(
             method,
             build_raw_path_from_scope(scope),
+            body=body_bytes,
+            headers=build_headers_from_scope(scope),
         )
         body = encode_response_body(response)
 
@@ -1341,7 +1463,18 @@ def create_asgi_app(backend_app: BackendApp | None = None) -> BackendASGIApp:
 def create_handler(app: BackendApp) -> type[BaseHTTPRequestHandler]:
     class RequestHandler(BaseHTTPRequestHandler):
         def respond(self) -> None:
-            response = app.handle_request(self.command, self.path)
+            content_length = int(self.headers.get("Content-Length", "0") or "0")
+            body = self.rfile.read(content_length) if content_length > 0 else b""
+            headers = {
+                key.lower(): value
+                for key, value in self.headers.items()
+            }
+            response = app.handle_request(
+                self.command,
+                self.path,
+                body=body,
+                headers=headers,
+            )
             self.send_response(response.status_code)
 
             for key, value in CORS_HEADERS.items():
@@ -1389,6 +1522,7 @@ def create_handler(app: BackendApp) -> type[BaseHTTPRequestHandler]:
 
 def run_server() -> None:
     app = BackendApp()
+    app.configure_telegram_webhook()
     server = ThreadingHTTPServer(
         (app.config.host, app.config.port),
         create_handler(app),

@@ -5,9 +5,11 @@ from backend.telegram_bot import (
     TelegramBotConfig,
     TelegramBotError,
     build_web_app_markup,
+    build_webhook_url,
     create_menu_button_payload,
     create_start_message_payload,
     extract_message_context,
+    matches_webhook_secret,
     normalize_command,
 )
 
@@ -22,6 +24,8 @@ TEST_CONFIG = TelegramBotConfig(
     set_chat_menu_button=True,
     button_text="Открыть приложение",
     start_text="Открой приложение по кнопке ниже.",
+    backend_public_url="https://example.com",
+    webhook_secret="super-secret",
 )
 
 
@@ -29,6 +33,7 @@ class FakeTelegramBotClient:
     def __init__(self) -> None:
         self.sent_chat_ids: list[int] = []
         self.menu_button_calls = 0
+        self.webhook_calls: list[dict[str, object]] = []
         self.delete_webhook_calls: list[bool] = []
         self.updates_calls = 0
         self.fail_setup_once = False
@@ -45,6 +50,21 @@ class FakeTelegramBotClient:
 
     def set_chat_menu_button(self) -> None:
         self.menu_button_calls += 1
+
+    def set_webhook(
+        self,
+        url: str,
+        *,
+        drop_pending_updates: bool,
+        secret_token: str | None,
+    ) -> None:
+        self.webhook_calls.append(
+            {
+                "url": url,
+                "drop_pending_updates": drop_pending_updates,
+                "secret_token": secret_token,
+            }
+        )
 
     def get_updates(self, _offset: int | None) -> list[dict[str, object]]:
         self.updates_calls += 1
@@ -106,6 +126,26 @@ class TelegramBotTests(unittest.TestCase):
             TEST_CONFIG.mini_app_url,
         )
 
+    def test_build_webhook_url_uses_backend_public_url(self) -> None:
+        self.assertEqual(
+            build_webhook_url(TEST_CONFIG),
+            "https://example.com/telegram/webhook",
+        )
+
+    def test_matches_webhook_secret_accepts_expected_header(self) -> None:
+        self.assertTrue(
+            matches_webhook_secret(
+                {"x-telegram-bot-api-secret-token": "super-secret"},
+                "super-secret",
+            )
+        )
+        self.assertFalse(
+            matches_webhook_secret(
+                {"x-telegram-bot-api-secret-token": "wrong"},
+                "super-secret",
+            )
+        )
+
     def test_process_updates_sends_start_message_and_advances_offset(self) -> None:
         client = FakeTelegramBotClient()
         app = TelegramBotApp(TEST_CONFIG, client=client)
@@ -151,6 +191,25 @@ class TelegramBotTests(unittest.TestCase):
         app.ensure_setup()
 
         self.assertEqual(client.delete_webhook_calls, [False])
+        self.assertEqual(client.menu_button_calls, 1)
+        self.assertTrue(app.is_configured)
+
+    def test_ensure_webhook_setup_registers_webhook_and_menu_button(self) -> None:
+        client = FakeTelegramBotClient()
+        app = TelegramBotApp(TEST_CONFIG, client=client)
+
+        app.ensure_webhook_setup()
+
+        self.assertEqual(
+            client.webhook_calls,
+            [
+                {
+                    "url": "https://example.com/telegram/webhook",
+                    "drop_pending_updates": False,
+                    "secret_token": "super-secret",
+                }
+            ],
+        )
         self.assertEqual(client.menu_button_calls, 1)
         self.assertTrue(app.is_configured)
 

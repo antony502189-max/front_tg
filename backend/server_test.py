@@ -35,6 +35,28 @@ TEST_CONFIG = {
 }
 
 
+class FakeWebhookBotApp:
+    def __init__(self, secret: str | None = "secret") -> None:
+        self.config = type(
+            "Config",
+            (),
+            {
+                "webhook_secret": secret,
+                "backend_public_url": "https://example.com",
+            },
+        )()
+        self.is_configured = False
+        self.setup_calls = 0
+        self.received_updates: list[dict[str, object]] = []
+
+    def ensure_webhook_setup(self) -> None:
+        self.setup_calls += 1
+        self.is_configured = True
+
+    def handle_update(self, update: dict[str, object]) -> None:
+        self.received_updates.append(update)
+
+
 class BackendServerTests(unittest.TestCase):
     def test_asgi_app_serves_health_response(self) -> None:
         backend_app = BackendApp(config=TEST_CONFIG, fetcher=lambda *_: {})
@@ -79,12 +101,84 @@ class BackendServerTests(unittest.TestCase):
         self.assertTrue(response.payload["ok"])
         self.assertEqual(response.payload["healthPath"], "/api/health")
 
+    def test_root_request_includes_webhook_path_when_bot_is_enabled(self) -> None:
+        bot_app = FakeWebhookBotApp()
+        app = BackendApp(
+            config=TEST_CONFIG,
+            fetcher=lambda *_: {},
+            telegram_bot_app=bot_app,
+        )
+
+        response = app.handle_request("GET", "/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.payload["telegramWebhookPath"], "/telegram/webhook")
+
     def test_route_config_resolves_known_routes(self) -> None:
         self.assertEqual(route_config("/api/schedule").cache_namespace, "/schedule")
         self.assertEqual(route_config("/api/grades").query_param, "studentCardNumber")
         self.assertEqual(route_config("/api/employees").min_length, 2)
         self.assertEqual(route_config("/api/auditories").query_param, "q")
         self.assertIsNone(route_config("/unknown"))
+
+    def test_webhook_post_processes_update(self) -> None:
+        bot_app = FakeWebhookBotApp()
+        app = BackendApp(
+            config=TEST_CONFIG,
+            fetcher=lambda *_: {},
+            telegram_bot_app=bot_app,
+        )
+        body = json.dumps(
+            {
+                "update_id": 1,
+                "message": {
+                    "chat": {"id": 55},
+                    "text": "/start",
+                },
+            }
+        ).encode("utf-8")
+
+        response = app.handle_request(
+            "POST",
+            "/telegram/webhook",
+            body=body,
+            headers={"x-telegram-bot-api-secret-token": "secret"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.payload, {"ok": True})
+        self.assertEqual(len(bot_app.received_updates), 1)
+
+    def test_webhook_post_rejects_invalid_secret(self) -> None:
+        bot_app = FakeWebhookBotApp()
+        app = BackendApp(
+            config=TEST_CONFIG,
+            fetcher=lambda *_: {},
+            telegram_bot_app=bot_app,
+        )
+
+        response = app.handle_request(
+            "POST",
+            "/telegram/webhook",
+            body=b"{}",
+            headers={"x-telegram-bot-api-secret-token": "wrong"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(bot_app.received_updates, [])
+
+    def test_configure_telegram_webhook_runs_once(self) -> None:
+        bot_app = FakeWebhookBotApp()
+        app = BackendApp(
+            config=TEST_CONFIG,
+            fetcher=lambda *_: {},
+            telegram_bot_app=bot_app,
+        )
+
+        app.configure_telegram_webhook()
+        app.configure_telegram_webhook()
+
+        self.assertEqual(bot_app.setup_calls, 1)
 
     def test_returns_400_when_required_query_is_missing(self) -> None:
         app = BackendApp(config=TEST_CONFIG, fetcher=lambda *_: {})

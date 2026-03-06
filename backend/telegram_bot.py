@@ -4,7 +4,7 @@ import json
 import os
 import time
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -19,6 +19,9 @@ load_project_env()
 
 JsonValue = Any
 SleepFn = Callable[[float], None]
+HeaderMap = Mapping[str, str]
+ALLOWED_UPDATE_TYPES = ["message", "edited_message"]
+WEBHOOK_PATH = "/telegram/webhook"
 
 
 class TelegramBotError(Exception):
@@ -62,11 +65,23 @@ class TelegramBotConfig:
     set_chat_menu_button: bool
     button_text: str
     start_text: str
+    backend_public_url: str | None = None
+    webhook_secret: str | None = None
+
+
+def parse_string_env(name: str) -> str | None:
+    raw = os.getenv(name)
+
+    if raw is None:
+        return None
+
+    normalized = raw.strip()
+    return normalized or None
 
 
 def load_config() -> TelegramBotConfig:
-    bot_token = os.getenv("BOT_TOKEN", "").strip()
-    mini_app_url = os.getenv("MINI_APP_URL", "").strip()
+    bot_token = parse_string_env("BOT_TOKEN") or ""
+    mini_app_url = parse_string_env("MINI_APP_URL") or ""
 
     if not bot_token:
         raise TelegramBotError('Missing required env var "BOT_TOKEN"')
@@ -92,6 +107,30 @@ def load_config() -> TelegramBotConfig:
             "Открой приложение по кнопке ниже.",
         ).strip()
         or "Открой приложение по кнопке ниже.",
+        backend_public_url=parse_string_env("BACKEND_PUBLIC_URL"),
+        webhook_secret=parse_string_env("TELEGRAM_WEBHOOK_SECRET"),
+    )
+
+
+def load_webhook_config() -> TelegramBotConfig | None:
+    backend_public_url = parse_string_env("BACKEND_PUBLIC_URL")
+
+    if not backend_public_url:
+        return None
+
+    config = load_config()
+    return TelegramBotConfig(
+        bot_token=config.bot_token,
+        mini_app_url=config.mini_app_url,
+        api_base_url=config.api_base_url,
+        polling_timeout_s=config.polling_timeout_s,
+        retry_delay_ms=config.retry_delay_ms,
+        drop_pending_updates=config.drop_pending_updates,
+        set_chat_menu_button=config.set_chat_menu_button,
+        button_text=config.button_text,
+        start_text=config.start_text,
+        backend_public_url=backend_public_url,
+        webhook_secret=parse_string_env("TELEGRAM_WEBHOOK_SECRET"),
     )
 
 
@@ -173,6 +212,24 @@ def create_menu_button_payload(config: TelegramBotConfig) -> dict[str, Any]:
     }
 
 
+def build_webhook_url(config: TelegramBotConfig) -> str:
+    if not config.backend_public_url:
+        raise TelegramBotError('Missing required env var "BACKEND_PUBLIC_URL"')
+
+    return f"{config.backend_public_url.rstrip('/')}{WEBHOOK_PATH}"
+
+
+def matches_webhook_secret(
+    headers: HeaderMap,
+    expected_secret: str | None,
+) -> bool:
+    if not expected_secret:
+        return True
+
+    actual_secret = headers.get("x-telegram-bot-api-secret-token", "").strip()
+    return actual_secret == expected_secret
+
+
 class TelegramBotClient:
     def __init__(self, config: TelegramBotConfig) -> None:
         self.config = config
@@ -225,7 +282,7 @@ class TelegramBotClient:
     def get_updates(self, offset: int | None = None) -> list[dict[str, Any]]:
         payload: dict[str, Any] = {
             "timeout": self.config.polling_timeout_s,
-            "allowed_updates": ["message", "edited_message"],
+            "allowed_updates": ALLOWED_UPDATE_TYPES,
         }
 
         if offset is not None:
@@ -245,6 +302,24 @@ class TelegramBotClient:
 
     def set_chat_menu_button(self) -> None:
         self._request("setChatMenuButton", create_menu_button_payload(self.config))
+
+    def set_webhook(
+        self,
+        url: str,
+        *,
+        drop_pending_updates: bool,
+        secret_token: str | None,
+    ) -> None:
+        payload: dict[str, Any] = {
+            "url": url,
+            "allowed_updates": ALLOWED_UPDATE_TYPES,
+            "drop_pending_updates": drop_pending_updates,
+        }
+
+        if secret_token:
+            payload["secret_token"] = secret_token
+
+        self._request("setWebhook", payload)
 
 
 def _read_telegram_error(raw_body: bytes) -> str:
@@ -281,6 +356,18 @@ class TelegramBotApp:
 
     def ensure_setup(self) -> None:
         self.client.delete_webhook(self.config.drop_pending_updates)
+
+        if self.config.set_chat_menu_button:
+            self.client.set_chat_menu_button()
+
+        self.is_configured = True
+
+    def ensure_webhook_setup(self) -> None:
+        self.client.set_webhook(
+            build_webhook_url(self.config),
+            drop_pending_updates=self.config.drop_pending_updates,
+            secret_token=self.config.webhook_secret,
+        )
 
         if self.config.set_chat_menu_button:
             self.client.set_chat_menu_button()

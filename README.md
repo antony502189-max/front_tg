@@ -68,10 +68,11 @@ Backend поднимается локально на `http://localhost:8787`, Vi
 - `GET /api/schedule?studentGroup=...`
 - `GET /api/grades?studentCardNumber=...`
 - `GET /api/employees?q=...`
+- `POST /telegram/webhook`
 
 Telegram-обёртка:
-- работает через long polling;
-- автоматически снимает webhook перед запуском polling;
+- может работать через long polling локально;
+- на backend web service регистрирует webhook и принимает update через `POST /telegram/webhook`;
 - отвечает на `/start`, `/app`, `/help`;
 - отправляет кнопку `web_app` для открытия Mini App;
 - может выставить menu button у бота автоматически.
@@ -103,6 +104,8 @@ npm run dev
 npm run dev:bot
 ```
 
+Этот скрипт нужен только для локального long polling. Для Render рекомендуется webhook через существующий backend web service.
+
 Проверка backend:
 
 ```bash
@@ -127,11 +130,14 @@ npm run test:backend
 - frontend собирается из `frontend/` как static site;
 - frontend использует `VITE_API_BASE_URL=https://front-tg-backend.onrender.com/api`;
 - frontend использует `HashRouter`, поэтому маршруты работают даже если static site создан вручную без SPA rewrite;
-- backend стартует командой `uvicorn server:app --host 0.0.0.0 --port $PORT`.
+- backend стартует командой `uvicorn server:app --host 0.0.0.0 --port $PORT`;
+- если на backend заданы `BOT_TOKEN`, `MINI_APP_URL`, `BACKEND_PUBLIC_URL` и `TELEGRAM_WEBHOOK_SECRET`, этот же web service автоматически регистрирует Telegram webhook на `/telegram/webhook`.
 
 Важно для Telegram:
 
 - `MINI_APP_URL` у бота должен указывать уже на публичный URL frontend-сервиса Render, например `https://front-tg.onrender.com`;
+- `BACKEND_PUBLIC_URL` должен указывать на публичный URL backend-сервиса, например `https://front-tg-backend.onrender.com`;
+- `TELEGRAM_WEBHOOK_SECRET` нужен для проверки заголовка `X-Telegram-Bot-Api-Secret-Token`;
 - backend URL можно открывать как сервисный endpoint: `/api/health` для health-check и `/` для краткого описания сервиса.
 
 ## Переменные окружения
@@ -147,6 +153,8 @@ npm run test:backend
 - `RETRY_DELAY_MS`
 - `BOT_TOKEN`
 - `MINI_APP_URL`
+- `BACKEND_PUBLIC_URL`
+- `TELEGRAM_WEBHOOK_SECRET`
 - `TELEGRAM_API_BASE_URL`
 - `TELEGRAM_POLLING_TIMEOUT_S`
 - `TELEGRAM_RETRY_DELAY_MS`
@@ -159,4 +167,5 @@ npm run test:backend
 
 Важно для Telegram:
 - для реального запуска Mini App внутри Telegram нужен публичный HTTPS URL в `MINI_APP_URL`;
+- для webhook-режима backend тоже должен иметь публичный HTTPS URL в `BACKEND_PUBLIC_URL`;
 - локальный `http://localhost:5173` подходит только для браузерной разработки, но не для нормального открытия Mini App у пользователей.
