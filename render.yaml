@@ -1,18 +1,18 @@
 services:
   - type: web
-    name: front-tg
+    name: frontend-tg
     runtime: static
     buildCommand: cd frontend && npm ci && npm run build
     staticPublishPath: frontend/dist
     envVars:
       - key: VITE_API_BASE_URL
-        value: https://front-tg-backend.onrender.com/api
+        value: https://backend-tg-u57f.onrender.com/api
     routes:
       - type: rewrite
         source: /*
         destination: /index.html
   - type: web
-    name: front-tg-backend
+    name: backend-tg-u57f
     runtime: python
     buildCommand: pip install -r backend/requirements.txt
     startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
@@ -31,9 +31,9 @@ services:
       - key: RETRY_DELAY_MS
         value: 250
       - key: MINI_APP_URL
-        value: https://front-tg.onrender.com
+        value: https://frontend-tg.onrender.com
       - key: BACKEND_PUBLIC_URL
-        value: https://front-tg-backend.onrender.com
+        value: https://backend-tg-u57f.onrender.com
       - key: TELEGRAM_WEBHOOK_SECRET
         generateValue: true
       - key: BOT_TOKEN

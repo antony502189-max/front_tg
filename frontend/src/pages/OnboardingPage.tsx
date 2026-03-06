@@ -1,69 +1,56 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
+import { useShallow } from 'zustand/react/shallow'
+import {
+  GROUP_LENGTH,
+  STUDENT_CARD_MIN_LENGTH,
+  useStudentProfileForm,
+} from '../hooks/useStudentProfileForm'
 import { useUserStore } from '../store/userStore'
-
-const GROUP_LENGTH = 6
-const STUDENT_CARD_MIN_LENGTH = 4
-const STUDENT_CARD_MAX_LENGTH = 32
 
 export const OnboardingPage = () => {
   const navigate = useNavigate()
-  const existingGroupNumber = useUserStore(
-    (state) => state.groupNumber,
-  )
-  const existingCardNumber = useUserStore(
-    (state) => state.studentCardNumber,
-  )
-  const setOnboardingData = useUserStore(
-    (state) => state.setOnboardingData,
-  )
-
-  const [groupNumber, setGroupNumber] = useState(
-    existingGroupNumber ?? '',
-  )
-  const [studentCardNumber, setStudentCardNumber] = useState(
-    existingCardNumber ?? '',
-  )
-  const [touched, setTouched] = useState({
-    group: false,
-    card: false,
-  })
-
-  const isGroupValid = useMemo(
-    () => groupNumber.length === GROUP_LENGTH,
-    [groupNumber],
-  )
-  const isCardValid = useMemo(
-    () =>
-      studentCardNumber.trim().length >= STUDENT_CARD_MIN_LENGTH,
-    [studentCardNumber],
-  )
-  const isFormValid = isGroupValid && isCardValid
-
-  const handleGroupChange = (value: string) => {
-    const numeric = value.replace(/\D/g, '').slice(0, GROUP_LENGTH)
-    setGroupNumber(numeric)
-  }
-
-  const handleCardChange = (value: string) => {
-    setStudentCardNumber(value.slice(0, STUDENT_CARD_MAX_LENGTH))
-  }
-
-  const handleSubmit = (event: FormEvent) => {
-    event.preventDefault()
-    setTouched({ group: true, card: true })
-
-    if (!isFormValid) {
-      return
-    }
-
-    setOnboardingData({
+  const { existingGroupNumber, existingCardNumber, setOnboardingData } =
+    useUserStore(
+      useShallow((state) => ({
+        existingGroupNumber: state.groupNumber,
+        existingCardNumber: state.studentCardNumber,
+        setOnboardingData: state.setOnboardingData,
+      })),
+    )
+  const handleFormSubmit = useCallback(
+    ({
       groupNumber,
       studentCardNumber,
-    })
-    navigate('/app/planner', { replace: true })
-  }
+    }: {
+      groupNumber: string
+      studentCardNumber: string
+    }) => {
+      setOnboardingData({
+        groupNumber,
+        studentCardNumber,
+      })
+      navigate('/app/planner', { replace: true })
+    },
+    [navigate, setOnboardingData],
+  )
+  const {
+    groupNumber,
+    studentCardNumber,
+    touched,
+    isGroupValid,
+    isCardValid,
+    isFormValid,
+    updateGroupNumber,
+    updateStudentCardNumber,
+    markFieldTouched,
+    handleSubmit,
+  } = useStudentProfileForm({
+    initialGroupNumber: existingGroupNumber,
+    initialStudentCardNumber: existingCardNumber,
+    onSubmit: handleFormSubmit,
+  })
 
   return (
     <div className="onboarding-page">
@@ -105,11 +92,9 @@ export const OnboardingPage = () => {
               placeholder="Например, 123456"
               value={groupNumber}
               onChange={(event) =>
-                handleGroupChange(event.target.value)
+                updateGroupNumber(event.target.value)
               }
-              onBlur={() =>
-                setTouched((prev) => ({ ...prev, group: true }))
-              }
+              onBlur={() => markFieldTouched('group')}
             />
             {touched.group && !isGroupValid ? (
               <p className="onboarding-error">
@@ -142,11 +127,9 @@ export const OnboardingPage = () => {
               placeholder="Как в IIS, например 12345678"
               value={studentCardNumber}
               onChange={(event) =>
-                handleCardChange(event.target.value)
+                updateStudentCardNumber(event.target.value)
               }
-              onBlur={() =>
-                setTouched((prev) => ({ ...prev, card: true }))
-              }
+              onBlur={() => markFieldTouched('card')}
             />
             {touched.card && !isCardValid ? (
               <p className="onboarding-error">

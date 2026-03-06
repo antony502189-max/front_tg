@@ -1,4 +1,4 @@
-import { apiClient } from './client'
+import { apiGet } from './client'
 import type { Lesson } from '../store/scheduleStore'
 
 export type DaySchedule = {
@@ -12,11 +12,12 @@ export type WeekSchedule = {
 
 export async function fetchStudentSchedule(
   groupNumber: string,
+  signal?: AbortSignal,
 ): Promise<WeekSchedule> {
-  const response = await apiClient.get<WeekSchedule>('/schedule', {
+  return apiGet<WeekSchedule>('/schedule', {
     params: { studentGroup: groupNumber.trim() },
+    signal,
+    cacheTtlMs: 60_000,
   })
-
-  return response.data
 }
 

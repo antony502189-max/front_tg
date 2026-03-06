@@ -1,10 +1,23 @@
-import { useEffect, useMemo, useState } from 'react'
+import {
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react'
 import { fetchStudentSchedule } from '../api/schedule'
 import { CalendarStrip } from '../components/schedule/CalendarStrip'
 import { LessonCard } from '../components/schedule/LessonCard'
-import { useScheduleStore, type Lesson } from '../store/scheduleStore'
+import { useAsyncResource } from '../hooks/useAsyncResource'
+import {
+  selectLessonsForDate,
+  useScheduleStore,
+  type Lesson,
+} from '../store/scheduleStore'
 import { useUserStore } from '../store/userStore'
 import { buildDateTime, toDateKey } from '../utils/date'
+import { useShallow } from 'zustand/react/shallow'
+import type { WeekSchedule } from '../api/schedule'
 
 const findCurrentAndNextLesson = (
   date: string,
@@ -15,16 +28,12 @@ const findCurrentAndNextLesson = (
     return { currentId: null, nextId: null }
   }
 
-  const sorted = [...lessons].sort((a, b) =>
-    a.startTime.localeCompare(b.startTime),
-  )
-
   const now = new Date()
 
   let currentId: string | null = null
   let nextId: string | null = null
 
-  for (const lesson of sorted) {
+  for (const lesson of lessons) {
     const start = buildDateTime(date, lesson.startTime)
     const end = buildDateTime(date, lesson.endTime)
 
@@ -49,74 +58,87 @@ const findCurrentAndNextLesson = (
 export const SchedulePage = () => {
   const groupNumber = useUserStore((state) => state.groupNumber)
   const normalizedGroupNumber = groupNumber?.trim() ?? ''
-
-  const isLoading = useScheduleStore((state) => state.isLoading)
-  const error = useScheduleStore((state) => state.error)
-  const calendarDays = useScheduleStore((state) => state.days)
-  const setLoading = useScheduleStore((state) => state.setLoading)
-  const setError = useScheduleStore((state) => state.setError)
-  const setSchedule = useScheduleStore((state) => state.setSchedule)
-  const clearSchedule = useScheduleStore((state) => state.clearSchedule)
+  const { calendarDays, setSchedule, clearSchedule } =
+    useScheduleStore(
+      useShallow((state) => ({
+        calendarDays: state.days,
+        setSchedule: state.setSchedule,
+        clearSchedule: state.clearSchedule,
+      })),
+    )
 
   const [selectedDate, setSelectedDate] = useState<string>(() =>
     toDateKey(new Date()),
   )
-  const [reloadToken, setReloadToken] = useState(0)
-
-  const lessonsForSelectedDate = useScheduleStore((state) =>
-    state.getLessonsForDate(selectedDate),
+  const lessonsSelector = useMemo(
+    () => selectLessonsForDate(selectedDate),
+    [selectedDate],
   )
+  const lessonsForSelectedDate = useScheduleStore(lessonsSelector)
+  const hasGroup = normalizedGroupNumber.length > 0
+  const requestKey = hasGroup ? normalizedGroupNumber : null
+  const loadSchedule = useCallback(
+    (signal: AbortSignal) =>
+      fetchStudentSchedule(normalizedGroupNumber, signal),
+    [normalizedGroupNumber],
+  )
+  const mapScheduleError = useCallback(
+    () => 'Не удалось загрузить расписание.',
+    [],
+  )
+  const {
+    data,
+    error,
+    isLoading,
+    reload,
+    hasResolvedCurrentRequest,
+  } = useAsyncResource<WeekSchedule | null>({
+    enabled: hasGroup,
+    requestKey,
+    initialData: null,
+    load: loadSchedule,
+    getErrorMessage: mapScheduleError,
+  })
 
   useEffect(() => {
-    if (!normalizedGroupNumber) {
+    if (!hasGroup) {
       clearSchedule()
-      setLoading(false)
-      setError(
-        'Добавьте учебную группу в настройках, чтобы видеть расписание.',
-      )
       return
     }
 
-    let isCancelled = false
+    clearSchedule()
+  }, [clearSchedule, hasGroup, requestKey])
 
-    setLoading(true)
-    setError(null)
-
-    fetchStudentSchedule(normalizedGroupNumber)
-      .then((data) => {
-        if (isCancelled) return
-
-        setSchedule(data.days)
-        setSelectedDate((currentSelectedDate) => {
-          if (
-            data.days.some((day) => day.date === currentSelectedDate) ||
-            data.days.length === 0
-          ) {
-            return currentSelectedDate
-          }
-
-          return data.days[0]?.date ?? currentSelectedDate
-        })
-
-        setLoading(false)
-      })
-      .catch(() => {
-        if (isCancelled) return
-
-        clearSchedule()
-        setError('Не удалось загрузить расписание.')
-        setLoading(false)
-      })
-
-    return () => {
-      isCancelled = true
+  useEffect(() => {
+    if (!hasGroup || !hasResolvedCurrentRequest) {
+      return
     }
+
+    if (!data) {
+      clearSchedule()
+      return
+    }
+
+    startTransition(() => {
+      setSchedule(data.days)
+      setSelectedDate((currentSelectedDate) => {
+        if (
+          data.days.some(
+            (day) => day.date === currentSelectedDate,
+          ) ||
+          data.days.length === 0
+        ) {
+          return currentSelectedDate
+        }
+
+        return data.days[0]?.date ?? currentSelectedDate
+      })
+    })
   }, [
-    normalizedGroupNumber,
-    reloadToken,
     clearSchedule,
-    setError,
-    setLoading,
+    data,
+    hasGroup,
+    hasResolvedCurrentRequest,
     setSchedule,
   ])
 
@@ -132,17 +154,14 @@ export const SchedulePage = () => {
     [lessonsForSelectedDate, selectedDate, todayKey],
   )
 
-  const handleRetry = () => {
-    setReloadToken((token) => token + 1)
-  }
-
   const handleSelectDate = (date: string) => {
     setSelectedDate(date)
   }
 
-  const visibleLessons = normalizedGroupNumber
-    ? lessonsForSelectedDate
-    : []
+  const displayError = hasGroup
+    ? error
+    : 'Добавьте учебную группу в настройках, чтобы видеть расписание.'
+  const visibleLessons = hasGroup ? lessonsForSelectedDate : []
   const hasLessons = visibleLessons.length > 0
 
   return (
@@ -173,14 +192,14 @@ export const SchedulePage = () => {
           </div>
         )}
 
-        {!isLoading && error && (
+        {!isLoading && displayError && (
           <div className="schedule-error-card">
-            <p className="schedule-error-text">{error}</p>
-            {normalizedGroupNumber && (
+            <p className="schedule-error-text">{displayError}</p>
+            {hasGroup && (
               <button
                 type="button"
                 className="schedule-retry-button"
-                onClick={handleRetry}
+                onClick={reload}
               >
                 Повторить попытку
               </button>
@@ -188,7 +207,7 @@ export const SchedulePage = () => {
           </div>
         )}
 
-        {!isLoading && !error && (
+        {!isLoading && !displayError && (
           <section className="schedule-lessons-section">
             <h2 className="schedule-section-title">
               {selectedDate === todayKey

@@ -1,4 +1,4 @@
-import { apiClient } from './client'
+import { apiGet } from './client'
 
 export type Employee = {
   id: string
@@ -8,17 +8,20 @@ export type Employee = {
   avatarUrl?: string
 }
 
-export async function searchTeachers(query: string): Promise<Employee[]> {
+export async function searchTeachers(
+  query: string,
+  signal?: AbortSignal,
+): Promise<Employee[]> {
   const trimmed = query.trim()
 
   if (!trimmed) {
     return []
   }
 
-  const response = await apiClient.get<Employee[]>('/employees', {
+  return apiGet<Employee[]>('/employees', {
     params: { q: trimmed },
+    signal,
+    cacheTtlMs: 5 * 60_000,
   })
-
-  return response.data
 }
 

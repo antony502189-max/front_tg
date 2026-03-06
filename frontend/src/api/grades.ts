@@ -1,4 +1,4 @@
-import { apiClient, LONG_API_TIMEOUT_MS } from './client'
+import { apiGet, LONG_API_TIMEOUT_MS } from './client'
 import type { GradesResponse } from '../types/grades'
 
 export type {
@@ -10,12 +10,13 @@ export type {
 
 export async function fetchGrades(
   studentCardNumber: string,
+  signal?: AbortSignal,
 ): Promise<GradesResponse> {
-  const response = await apiClient.get<GradesResponse>('/grades', {
+  return apiGet<GradesResponse>('/grades', {
     params: { studentCardNumber: studentCardNumber.trim() },
     timeout: LONG_API_TIMEOUT_MS,
+    signal,
+    cacheTtlMs: 60_000,
   })
-
-  return response.data
 }
 

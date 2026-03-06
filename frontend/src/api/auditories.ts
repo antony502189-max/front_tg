@@ -1,4 +1,4 @@
-import { apiClient } from './client'
+import { apiGet } from './client'
 
 export type Auditory = {
   id: string
@@ -12,16 +12,19 @@ export type Auditory = {
   note?: string
 }
 
-export async function searchAuditories(query: string): Promise<Auditory[]> {
+export async function searchAuditories(
+  query: string,
+  signal?: AbortSignal,
+): Promise<Auditory[]> {
   const trimmed = query.trim()
 
   if (!trimmed) {
     return []
   }
 
-  const response = await apiClient.get<Auditory[]>('/auditories', {
+  return apiGet<Auditory[]>('/auditories', {
     params: { q: trimmed },
+    signal,
+    cacheTtlMs: 5 * 60_000,
   })
-
-  return response.data
 }

@@ -1,7 +1,11 @@
 import { useMemo, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { NewTaskModal } from '../components/planner/NewTaskModal'
 import { TaskCard } from '../components/planner/TaskCard'
-import { useScheduleStore } from '../store/scheduleStore'
+import {
+  selectTodayLessons,
+  useScheduleStore,
+} from '../store/scheduleStore'
 import {
   useTasksStore,
   type Task,
@@ -26,15 +30,18 @@ const filterTasks = (tasks: Task[], filter: TaskFilter) => {
 
 export const PlannerPage = () => {
   const [isModalOpen, setIsModalOpen] = useState(false)
-  const tasks = useTasksStore((state) => state.tasks)
-  const filter = useTasksStore((state) => state.filter)
-  const setFilter = useTasksStore((state) => state.setFilter)
-  const toggleDone = useTasksStore((state) => state.toggleDone)
-  const deleteTask = useTasksStore((state) => state.deleteTask)
+  const { tasks, filter, setFilter, toggleDone, deleteTask } =
+    useTasksStore(
+      useShallow((state) => ({
+        tasks: state.tasks,
+        filter: state.filter,
+        setFilter: state.setFilter,
+        toggleDone: state.toggleDone,
+        deleteTask: state.deleteTask,
+      })),
+    )
 
-  const todayLessons = useScheduleStore((state) =>
-    state.getTodayLessons(),
-  )
+  const todayLessons = useScheduleStore(selectTodayLessons)
 
   const filteredTasks = useMemo(
     () => filterTasks(tasks, filter),
@@ -94,8 +101,8 @@ export const PlannerPage = () => {
                     ? lessonsById.get(task.boundLessonId)
                     : undefined
                 }
-                onToggleDone={() => toggleDone(task.id)}
-                onDelete={() => deleteTask(task.id)}
+                onToggleDone={toggleDone}
+                onDelete={deleteTask}
               />
             ))
           ) : (

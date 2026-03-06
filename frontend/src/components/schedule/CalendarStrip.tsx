@@ -1,3 +1,4 @@
+import { memo, useMemo } from 'react'
 import type { DaySchedule } from '../../api/schedule'
 import { parseDateKey, toDateKey } from '../../utils/date'
 
@@ -29,16 +30,25 @@ const getDayNumber = (dateString: string) => {
   return date.getDate()
 }
 
-export const CalendarStrip = ({
+export const CalendarStrip = memo(({
   days,
   selectedDate,
   onSelectDate,
 }: CalendarStripProps) => {
   const todayKey = toDateKey(new Date())
+  const dayItems = useMemo(
+    () =>
+      days.map((day) => ({
+        ...day,
+        weekday: formatWeekday(day.date),
+        dayNumber: getDayNumber(day.date),
+      })),
+    [days],
+  )
 
   return (
     <div className="schedule-calendar-strip">
-      {days.map((day) => {
+      {dayItems.map((day) => {
         const isSelected = day.date === selectedDate
         const isToday = day.date === todayKey
 
@@ -52,10 +62,10 @@ export const CalendarStrip = ({
             onClick={() => onSelectDate(day.date)}
           >
             <span className="schedule-day-weekday">
-              {formatWeekday(day.date)}
+              {day.weekday}
             </span>
             <span className="schedule-day-number">
-              {getDayNumber(day.date)}
+              {day.dayNumber}
             </span>
             {isToday && (
               <span className="schedule-day-today-dot" aria-hidden="true" />
@@ -65,5 +75,7 @@ export const CalendarStrip = ({
       })}
     </div>
   )
-}
+})
+
+CalendarStrip.displayName = 'CalendarStrip'
 

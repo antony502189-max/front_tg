@@ -2,7 +2,7 @@ import asyncio
 import json
 import unittest
 from datetime import date
-from threading import Event, Lock
+from threading import Event, Lock, Thread
 
 from backend.server import (
     BackendApp,
@@ -296,6 +296,65 @@ class BackendServerTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.payload, {"subjects": [{"id": "1"}]})
+
+    def test_concurrent_identical_requests_share_inflight_result(self) -> None:
+        release = Event()
+        started = Event()
+        seen_paths: list[str] = []
+        seen_lock = Lock()
+        responses = []
+        errors = []
+
+        def fetcher(path: str, _params: dict[str, str]):
+            with seen_lock:
+                seen_paths.append(path)
+                if path == "/schedule":
+                    started.set()
+
+            if path == "/schedule":
+                if not release.wait(timeout=0.2):
+                    self.fail("schedule request was not blocked for inflight dedupe test")
+                return {"schedules": {"Понедельник": []}}
+
+            if path == "/schedule/current-week":
+                return 3
+
+            raise AssertionError(f"Unexpected path: {path}")
+
+        app = BackendApp(
+            config=TEST_CONFIG,
+            fetcher=fetcher,
+            today=lambda: date(2026, 3, 4),
+        )
+
+        def worker() -> None:
+            try:
+                responses.append(
+                    app.handle_request(
+                        "GET",
+                        "/api/schedule?studentGroup=353502",
+                    )
+                )
+            except Exception as error:  # pragma: no cover - debug safety
+                errors.append(error)
+
+        leader = Thread(target=worker)
+        follower = Thread(target=worker)
+
+        leader.start()
+        self.assertTrue(started.wait(timeout=0.1))
+        follower.start()
+        release.set()
+        leader.join()
+        follower.join()
+
+        self.assertEqual(errors, [])
+        self.assertEqual(len(responses), 2)
+        self.assertTrue(all(response.status_code == 200 for response in responses))
+        self.assertCountEqual(
+            seen_paths,
+            ["/schedule", "/schedule/current-week"],
+        )
 
     def test_cache_helpers_respect_fresh_and_stale_windows(self) -> None:
         store = {}

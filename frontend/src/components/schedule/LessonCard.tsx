@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import type { Lesson } from '../../store/scheduleStore'
 
 type LessonCardProps = {
@@ -6,7 +7,7 @@ type LessonCardProps = {
   isNext?: boolean
 }
 
-export const LessonCard = ({
+export const LessonCard = memo(({
   lesson,
   isCurrent = false,
   isNext = false,
@@ -52,5 +53,7 @@ export const LessonCard = ({
       </div>
     </article>
   )
-}
+})
+
+LessonCard.displayName = 'LessonCard'
 

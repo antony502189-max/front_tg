@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import json
 import math
-import os
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -15,7 +14,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 try:
-    from backend.env import load_project_env
+    from backend.env import load_project_env, parse_number_env, parse_string_env
     from backend.telegram_bot import (
         TelegramBotApp,
         TelegramBotError,
@@ -25,7 +24,7 @@ try:
         matches_webhook_secret,
     )
 except ModuleNotFoundError:  # pragma: no cover - fallback for direct script launch
-    from env import load_project_env  # type: ignore
+    from env import load_project_env, parse_number_env, parse_string_env  # type: ignore
     from telegram_bot import (  # type: ignore
         TelegramBotApp,
         TelegramBotError,
@@ -43,6 +42,7 @@ JsonValue = Any
 Fetcher = Callable[[str, dict[str, str]], JsonValue]
 NowFn = Callable[[], int]
 TodayFn = Callable[[], date]
+SERVICE_NAME = "front_tg_backend_python"
 
 
 @dataclass(frozen=True)
@@ -80,27 +80,31 @@ RUSSIAN_WEEKDAY_TO_INDEX = {
 }
 
 GRADES_SEARCH_TIMEOUT_MS = 2_500
-
-
-def parse_number_env(name: str, fallback: int) -> int:
-    raw = os.getenv(name)
-
-    if raw is None:
-        return fallback
-
-    try:
-        parsed = int(raw)
-    except ValueError:
-        return fallback
-
-    return parsed if parsed >= 0 else fallback
+TIMEOUT_ERROR_MARKERS = (
+    "timed out",
+    "timeout",
+    "время ожидания",
+    "time out",
+)
+ORDERED_WEEKDAYS = tuple(
+    day_name
+    for day_name, _ in sorted(
+        RUSSIAN_WEEKDAY_TO_INDEX.items(),
+        key=lambda item: item[1],
+    )
+)
+GRADES_EXECUTOR = ThreadPoolExecutor(max_workers=4)
 
 
 def load_config() -> AppConfig:
     return AppConfig(
-        host=os.getenv("HOST", "127.0.0.1"),
+        host=parse_string_env("HOST", "127.0.0.1") or "127.0.0.1",
         port=parse_number_env("PORT", 8787),
-        iis_base_url=os.getenv("IIS_BASE_URL", "https://iis.bsuir.by/api/v1"),
+        iis_base_url=parse_string_env(
+            "IIS_BASE_URL",
+            "https://iis.bsuir.by/api/v1",
+        )
+        or "https://iis.bsuir.by/api/v1",
         cache_ttl_ms=parse_number_env("CACHE_TTL_MS", 60_000),
         stale_ttl_ms=parse_number_env("STALE_TTL_MS", 300_000),
         request_timeout_ms=parse_number_env("REQUEST_TIMEOUT_MS", 10_000),
@@ -119,16 +123,7 @@ def coerce_config(config: AppConfig | Mapping[str, Any] | None) -> AppConfig:
     if isinstance(config, AppConfig):
         return config
 
-    merged_config = {
-        "host": CONFIG.host,
-        "port": CONFIG.port,
-        "iis_base_url": CONFIG.iis_base_url,
-        "cache_ttl_ms": CONFIG.cache_ttl_ms,
-        "stale_ttl_ms": CONFIG.stale_ttl_ms,
-        "request_timeout_ms": CONFIG.request_timeout_ms,
-        "max_retries": CONFIG.max_retries,
-        "retry_delay_ms": CONFIG.retry_delay_ms,
-    }
+    merged_config = vars(CONFIG).copy()
     merged_config.update(config)
 
     return AppConfig.from_mapping(merged_config)
@@ -261,14 +256,9 @@ def should_retry(error: UpstreamRequestError) -> bool:
         return error.status >= 500
 
     normalized_message = error.message.lower()
-    timeout_markers = (
-        "timed out",
-        "timeout",
-        "время ожидания",
-        "time out",
+    return not any(
+        marker in normalized_message for marker in TIMEOUT_ERROR_MARKERS
     )
-
-    return not any(marker in normalized_message for marker in timeout_markers)
 
 
 def extract_error_message(raw_body: bytes) -> str:
@@ -287,6 +277,17 @@ def extract_error_message(raw_body: bytes) -> str:
             return message.strip()
 
     return "Upstream API request failed"
+
+
+def unwrap_value_list(payload: Any) -> list[Any] | None:
+    if isinstance(payload, list):
+        return payload
+
+    if not isinstance(payload, dict):
+        return None
+
+    items = payload.get("value")
+    return items if isinstance(items, list) else None
 
 
 def create_fetcher(config: AppConfig) -> Fetcher:
@@ -358,6 +359,19 @@ def first_non_empty_string(*values: Any) -> str | None:
     return None
 
 
+def first_non_empty_field(raw: Mapping[str, Any], *fields: str) -> str | None:
+    return first_non_empty_string(*(raw.get(field) for field in fields))
+
+
+def first_list_field(raw: Mapping[str, Any], *fields: str) -> list[Any] | None:
+    for field in fields:
+        value = raw.get(field)
+        if isinstance(value, list):
+            return value
+
+    return None
+
+
 def normalize_lookup_value(value: Any) -> str:
     if value is None:
         return ""
@@ -403,7 +417,7 @@ def normalize_current_week(payload: Any) -> int:
 
 
 def compose_full_name(raw: dict[str, Any]) -> str | None:
-    fio = first_non_empty_string(raw.get("fio"))
+    fio = first_non_empty_field(raw, "fio")
     if fio is not None:
         return fio
 
@@ -454,10 +468,10 @@ def normalize_schedule_lesson(
     lesson_date: date,
     index: int,
 ) -> dict[str, Any]:
-    subject = first_non_empty_string(
-        raw_lesson.get("subjectFullName"),
-        raw_lesson.get("subject"),
-    ) or "Дисциплина"
+    subject = (
+        first_non_empty_field(raw_lesson, "subjectFullName", "subject")
+        or "Дисциплина"
+    )
 
     employees = raw_lesson.get("employees")
     teacher = None
@@ -477,12 +491,13 @@ def normalize_schedule_lesson(
         if normalized_rooms:
             room = ", ".join(normalized_rooms)
 
-    lesson_type = first_non_empty_string(
-        raw_lesson.get("lessonTypeAbbrev"),
-        raw_lesson.get("lessonType"),
+    lesson_type = first_non_empty_field(
+        raw_lesson,
+        "lessonTypeAbbrev",
+        "lessonType",
     )
-    start_time = first_non_empty_string(raw_lesson.get("startLessonTime")) or ""
-    end_time = first_non_empty_string(raw_lesson.get("endLessonTime")) or ""
+    start_time = first_non_empty_field(raw_lesson, "startLessonTime") or ""
+    end_time = first_non_empty_field(raw_lesson, "endLessonTime") or ""
     date_value = lesson_date.isoformat()
 
     return {
@@ -512,10 +527,8 @@ def normalize_schedule_response(
     monday = today_value - timedelta(days=today_value.weekday())
     days = []
 
-    for day_name, day_index in sorted(
-        RUSSIAN_WEEKDAY_TO_INDEX.items(),
-        key=lambda item: item[1],
-    ):
+    for day_name in ORDERED_WEEKDAYS:
+        day_index = RUSSIAN_WEEKDAY_TO_INDEX[day_name]
         lesson_date = monday + timedelta(days=day_index)
         raw_lessons = schedules.get(day_name)
         lessons = []
@@ -542,10 +555,7 @@ def normalize_employees_response(
     payload: Any,
     config: AppConfig | Mapping[str, Any],
 ) -> list[dict[str, Any]]:
-    items = payload
-    if isinstance(payload, dict):
-        items = payload.get("value", [])
-
+    items = unwrap_value_list(payload) or payload
     if not isinstance(items, list):
         return []
 
@@ -558,7 +568,7 @@ def normalize_employees_response(
 
         full_name = compose_full_name(item) or "Преподаватель"
         employee_id = item.get("id")
-        avatar_url = first_non_empty_string(item.get("photoLink"))
+        avatar_url = first_non_empty_field(item, "photoLink")
 
         if avatar_url is None and employee_id is not None:
             avatar_url = f"{base_url}/employees/photo/{employee_id}"
@@ -567,13 +577,14 @@ def normalize_employees_response(
             {
                 "id": str(employee_id or full_name),
                 "fullName": full_name,
-                "position": first_non_empty_string(
-                    item.get("jobPosition"),
-                    item.get("position"),
-                    item.get("rank"),
-                    item.get("degree"),
+                "position": first_non_empty_field(
+                    item,
+                    "jobPosition",
+                    "position",
+                    "rank",
+                    "degree",
                 ),
-                "department": first_non_empty_string(item.get("academicDepartment")),
+                "department": first_non_empty_field(item, "academicDepartment"),
                 "avatarUrl": avatar_url,
             }
         )
@@ -582,15 +593,12 @@ def normalize_employees_response(
 
 
 def normalize_auditories_response(payload: Any, query: str) -> list[dict[str, Any]]:
-    items = payload
-    if isinstance(payload, dict):
-        items = payload.get("value", [])
-
+    items = unwrap_value_list(payload) or payload
     if not isinstance(items, list):
         return []
 
     normalized_query = normalize_lookup_value(query)
-    result = []
+    ranked_result: list[tuple[bool, str, dict[str, Any]]] = []
 
     for item in items:
         if not isinstance(item, dict):
@@ -613,7 +621,7 @@ def normalize_auditories_response(payload: Any, query: str) -> list[dict[str, An
             department.get("name") if isinstance(department, dict) else None,
             department.get("abbrev") if isinstance(department, dict) else None,
         )
-        name = first_non_empty_string(item.get("name"))
+        name = first_non_empty_field(item, "name")
 
         if name is None:
             continue
@@ -638,27 +646,26 @@ def normalize_auditories_response(payload: Any, query: str) -> list[dict[str, An
         if normalized_query and normalized_query not in search_blob:
             continue
 
-        result.append(
-            {
-                "id": str(item.get("id", full_name)),
-                "name": name,
-                "building": building_name,
-                "fullName": full_name,
-                "type": type_name,
-                "typeAbbrev": type_abbrev,
-                "capacity": item.get("capacity"),
-                "department": department_name,
-                "note": first_non_empty_string(item.get("note")),
-            }
+        ranked_result.append(
+            (
+                not normalize_lookup_value(full_name).startswith(normalized_query),
+                full_name,
+                {
+                    "id": str(item.get("id", full_name)),
+                    "name": name,
+                    "building": building_name,
+                    "fullName": full_name,
+                    "type": type_name,
+                    "typeAbbrev": type_abbrev,
+                    "capacity": item.get("capacity"),
+                    "department": department_name,
+                    "note": first_non_empty_field(item, "note"),
+                },
+            )
         )
 
-    result.sort(
-        key=lambda item: (
-            not normalize_lookup_value(item["fullName"]).startswith(normalized_query),
-            item["fullName"],
-        )
-    )
-    return result[:50]
+    ranked_result.sort(key=lambda item: (item[0], item[1]))
+    return [item[2] for item in ranked_result[:50]]
 
 
 def find_student_card_match(
@@ -668,8 +675,8 @@ def find_student_card_match(
     normalized_student_card_number = normalize_lookup_value(student_card_number)
 
     if isinstance(payload, dict):
-        wrapped = payload.get("value")
-        if isinstance(wrapped, list):
+        wrapped = unwrap_value_list(payload)
+        if wrapped is not None:
             payload = wrapped
         elif payload.get("studentCardNumber") is not None:
             payload = [payload]
@@ -734,6 +741,56 @@ def normalize_mark(raw_mark: Any) -> dict[str, Any] | None:
     return mark
 
 
+def extract_marks_from_item(
+    raw: Mapping[str, Any],
+    *,
+    raw_mark_fields: tuple[str, ...],
+    average_fields: tuple[str, ...],
+    date_fields: tuple[str, ...] = (),
+) -> list[dict[str, Any]]:
+    mark_date = first_non_empty_field(raw, *date_fields) if date_fields else None
+    raw_marks = first_list_field(raw, *raw_mark_fields)
+    marks: list[dict[str, Any]] = []
+
+    if raw_marks is not None:
+        for raw_mark in raw_marks:
+            normalized_mark = normalize_mark(raw_mark)
+            if normalized_mark is None:
+                continue
+
+            if mark_date is not None and "date" not in normalized_mark:
+                normalized_mark = {**normalized_mark, "date": mark_date}
+
+            marks.append(normalized_mark)
+
+    if marks:
+        return marks
+
+    average_mark = first_finite_number(*(raw.get(field) for field in average_fields))
+    if average_mark is None:
+        return []
+
+    mark: dict[str, Any] = {"value": average_mark}
+    if mark_date is not None:
+        mark["date"] = mark_date
+
+    return [mark]
+
+
+def extract_grade_subject_name(
+    raw: Mapping[str, Any],
+    index: int,
+    *fields: str,
+) -> tuple[str, str]:
+    subject_name = first_non_empty_field(raw, *fields) or "Дисциплина"
+    subject_key = normalize_lookup_value(subject_name) or str(index)
+    return subject_name, subject_key
+
+
+def extract_grade_teacher(raw: Mapping[str, Any]) -> str | None:
+    return first_non_empty_field(raw, "teacher", "employee", "fio")
+
+
 def unwrap_grade_payload(payload: Any) -> Any:
     current = payload
 
@@ -761,89 +818,63 @@ def unwrap_grade_payload(payload: Any) -> Any:
 def extract_grade_subjects(payload: Any) -> list[dict[str, Any]]:
     candidates = unwrap_grade_payload(payload)
     if isinstance(candidates, dict):
-        lesson_items = candidates.get("lessons")
-        if isinstance(lesson_items, list):
+        lesson_items = first_list_field(candidates, "lessons")
+        if lesson_items is not None:
             grouped_subjects: dict[str, dict[str, Any]] = {}
 
             for index, item in enumerate(lesson_items):
                 if not isinstance(item, dict):
                     continue
 
-                raw_marks = item.get("marks")
-                marks = []
-                if isinstance(raw_marks, list):
-                    for raw_mark in raw_marks:
-                        normalized_mark = normalize_mark(raw_mark)
-                        if normalized_mark is None:
-                            continue
-
-                        if "date" not in normalized_mark:
-                            lesson_date = first_non_empty_string(
-                                item.get("dateString"),
-                                item.get("date"),
-                            )
-                            if lesson_date is not None:
-                                normalized_mark["date"] = lesson_date
-
-                        marks.append(normalized_mark)
-
-                if not marks:
-                    average_mark = first_finite_number(
-                        item.get("averageMark"),
-                        item.get("avgMark"),
-                        item.get("mark"),
-                        item.get("value"),
-                    )
-                    if average_mark is not None:
-                        mark: dict[str, Any] = {"value": average_mark}
-                        lesson_date = first_non_empty_string(
-                            item.get("dateString"),
-                            item.get("date"),
-                        )
-                        if lesson_date is not None:
-                            mark["date"] = lesson_date
-                        marks.append(mark)
-
+                marks = extract_marks_from_item(
+                    item,
+                    raw_mark_fields=("marks",),
+                    average_fields=("averageMark", "avgMark", "mark", "value"),
+                    date_fields=("dateString", "date"),
+                )
                 if not marks:
                     continue
 
-                subject_name = first_non_empty_string(
-                    item.get("lessonName"),
-                    item.get("lessonNameFull"),
-                    item.get("lessonNameAbbrev"),
-                    item.get("subject"),
-                    item.get("discipline"),
-                    item.get("disciplineName"),
-                    item.get("name"),
-                    item.get("title"),
-                ) or "Дисциплина"
-                subject_key = normalize_lookup_value(subject_name) or str(index)
-
-                if subject_key not in grouped_subjects:
-                    grouped_subjects[subject_key] = {
+                subject_name, subject_key = extract_grade_subject_name(
+                    item,
+                    index,
+                    "lessonName",
+                    "lessonNameFull",
+                    "lessonNameAbbrev",
+                    "subject",
+                    "discipline",
+                    "disciplineName",
+                    "name",
+                    "title",
+                )
+                teacher = extract_grade_teacher(item)
+                subject = grouped_subjects.setdefault(
+                    subject_key,
+                    {
                         "id": str(item.get("id", subject_key)),
                         "subject": subject_name,
-                        "teacher": first_non_empty_string(
-                            item.get("teacher"),
-                            item.get("employee"),
-                            item.get("fio"),
-                        ),
+                        "teacher": teacher,
                         "marks": [],
-                    }
-
-                grouped_subjects[subject_key]["marks"].extend(marks)
+                    },
+                )
+                if subject["teacher"] is None and teacher is not None:
+                    subject["teacher"] = teacher
+                subject["marks"].extend(marks)
 
             result = list(grouped_subjects.values())
             result.sort(key=lambda item: item["subject"])
             return result
 
         candidates = (
-            candidates.get("subjects")
-            or candidates.get("disciplines")
-            or candidates.get("items")
-            or candidates.get("results")
-            or candidates.get("ratingItems")
-            or candidates.get("value")
+            first_list_field(
+                candidates,
+                "subjects",
+                "disciplines",
+                "items",
+                "results",
+                "ratingItems",
+                "value",
+            )
             or []
         )
 
@@ -856,49 +887,26 @@ def extract_grade_subjects(payload: Any) -> list[dict[str, Any]]:
         if not isinstance(item, dict):
             continue
 
-        subject_name = first_non_empty_string(
-            item.get("subject"),
-            item.get("name"),
-            item.get("discipline"),
-            item.get("disciplineName"),
-            item.get("title"),
-        ) or "Дисциплина"
-
-        raw_marks = (
-            item.get("marks")
-            or item.get("grades")
-            or item.get("controlPoints")
-            or item.get("points")
-            or item.get("values")
-            or []
+        subject_name, _ = extract_grade_subject_name(
+            item,
+            index,
+            "subject",
+            "name",
+            "discipline",
+            "disciplineName",
+            "title",
         )
-
-        marks = []
-        if isinstance(raw_marks, list):
-            for raw_mark in raw_marks:
-                normalized_mark = normalize_mark(raw_mark)
-                if normalized_mark is not None:
-                    marks.append(normalized_mark)
-
-        if not marks:
-            average_mark = first_finite_number(
-                item.get("averageMark"),
-                item.get("avgMark"),
-                item.get("mark"),
-                item.get("value"),
-            )
-            if average_mark is not None:
-                marks.append({"value": average_mark})
+        marks = extract_marks_from_item(
+            item,
+            raw_mark_fields=("marks", "grades", "controlPoints", "points", "values"),
+            average_fields=("averageMark", "avgMark", "mark", "value"),
+        )
 
         subjects.append(
             {
                 "id": str(item.get("id", index)),
                 "subject": subject_name,
-                "teacher": first_non_empty_string(
-                    item.get("teacher"),
-                    item.get("employee"),
-                    item.get("fio"),
-                ),
+                "teacher": extract_grade_teacher(item),
                 "marks": marks,
             }
         )
@@ -922,11 +930,12 @@ def extract_grade_summary(payload: Any) -> dict[str, Any] | None:
         payload.get("ratingPlace"),
         payload.get("place"),
     )
-    speciality = first_non_empty_string(
-        payload.get("speciality"),
-        payload.get("specialty"),
-        payload.get("specialityAbbrev"),
-        payload.get("specialityName"),
+    speciality = first_non_empty_field(
+        payload,
+        "speciality",
+        "specialty",
+        "specialityAbbrev",
+        "specialityName",
     )
 
     if average is None and position is None and speciality is None:
@@ -985,6 +994,14 @@ class BackendApp:
         self.today = today or (lambda: datetime.now().date())
         self.started_at_ms = self.now_ms()
         self.lock = Lock()
+        self._inflight_requests: dict[str, Future[JsonValue]] = {}
+        self._timeout_fetchers: dict[int, Fetcher] = {}
+        self._route_payload_builders = {
+            "schedule": self._build_schedule_payload,
+            "employees": self._build_employees_payload,
+            "auditories": self._build_auditories_payload,
+            "grades": self._build_grades_payload,
+        }
         self.telegram_bot_app = (
             telegram_bot_app
             if telegram_bot_app is not None
@@ -1032,6 +1049,25 @@ class BackendApp:
             self.config.retry_delay_ms,
         )
 
+    def _timeout_fetcher(self, timeout_ms: int) -> Fetcher:
+        if not self.uses_default_fetcher:
+            return self.fetcher
+
+        normalized_timeout = max(timeout_ms, 1)
+
+        with self.lock:
+            fetcher = self._timeout_fetchers.get(normalized_timeout)
+            if fetcher is None:
+                fetcher = create_fetcher(
+                    replace(
+                        self.config,
+                        request_timeout_ms=normalized_timeout,
+                    )
+                )
+                self._timeout_fetchers[normalized_timeout] = fetcher
+
+        return fetcher
+
     def request_upstream_with_timeout(
         self,
         path: str,
@@ -1040,18 +1076,8 @@ class BackendApp:
         timeout_ms: int,
         max_retries: int,
     ) -> JsonValue:
-        fetcher = (
-            create_fetcher(
-                replace(
-                    self.config,
-                    request_timeout_ms=max(timeout_ms, 1),
-                )
-            )
-            if self.uses_default_fetcher
-            else self.fetcher
-        )
         return fetch_with_retry(
-            fetcher,
+            self._timeout_fetcher(timeout_ms),
             path,
             params,
             max_retries,
@@ -1101,39 +1127,38 @@ class BackendApp:
             ),
         }
 
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            futures = {
-                "search": executor.submit(
-                    self.request_upstream_with_timeout,
-                    requests["search"][0],
-                    requests["search"][1],
-                    timeout_ms=min(
-                        self.config.request_timeout_ms,
-                        GRADES_SEARCH_TIMEOUT_MS,
-                    ),
-                    max_retries=0,
+        futures = {
+            "search": GRADES_EXECUTOR.submit(
+                self.request_upstream_with_timeout,
+                requests["search"][0],
+                requests["search"][1],
+                timeout_ms=min(
+                    self.config.request_timeout_ms,
+                    GRADES_SEARCH_TIMEOUT_MS,
                 ),
-                "rating": executor.submit(
-                    self.request_upstream,
-                    requests["rating"][0],
-                    requests["rating"][1],
-                ),
-            }
+                max_retries=0,
+            ),
+            "rating": GRADES_EXECUTOR.submit(
+                self.request_upstream,
+                requests["rating"][0],
+                requests["rating"][1],
+            ),
+        }
 
-            for key, future in futures.items():
-                try:
-                    result = future.result()
-                except UpstreamRequestError as error:
-                    if key == "search":
-                        search_error = error
-                    else:
-                        rating_error = error
-                    continue
-
+        for key, future in futures.items():
+            try:
+                result = future.result()
+            except UpstreamRequestError as error:
                 if key == "search":
-                    search_payload = result
+                    search_error = error
                 else:
-                    rating_payload = result
+                    rating_error = error
+                continue
+
+            if key == "search":
+                search_payload = result
+            else:
+                rating_payload = result
 
         if search_payload is None and rating_payload is None:
             if search_error is not None and search_error.status == 404:
@@ -1159,19 +1184,12 @@ class BackendApp:
         )
 
     def build_route_payload(self, route: RouteConfig, query_value: str) -> JsonValue:
-        if route.kind == "schedule":
-            return self._build_schedule_payload(query_value)
+        builder = self._route_payload_builders.get(route.kind)
 
-        if route.kind == "employees":
-            return self._build_employees_payload(query_value)
+        if builder is None:
+            raise UpstreamRequestError("Unsupported route", status=500)
 
-        if route.kind == "auditories":
-            return self._build_auditories_payload(query_value)
-
-        if route.kind == "grades":
-            return self._build_grades_payload(query_value)
-
-        raise UpstreamRequestError("Unsupported route", status=500)
+        return builder(query_value)
 
     @staticmethod
     def _extract_query_value(parsed_url: Any, route: RouteConfig) -> str | None:
@@ -1220,6 +1238,50 @@ class BackendApp:
 
         return Response(200, {"ok": True})
 
+    def _read_fresh_cache(self, key: str, now_value: int) -> JsonValue | None:
+        with self.lock:
+            return read_fresh_cache(self.store, key, now_value)
+
+    def _read_stale_cache(self, key: str, now_value: int) -> JsonValue | None:
+        with self.lock:
+            return read_stale_cache(self.store, key, now_value)
+
+    def _write_cached_payload(self, key: str, payload: JsonValue) -> None:
+        with self.lock:
+            write_cache(
+                self.store,
+                key,
+                payload,
+                self.config.cache_ttl_ms,
+                self.config.stale_ttl_ms,
+                self.now_ms(),
+            )
+
+    def _get_or_create_inflight_request(
+        self,
+        key: str,
+    ) -> tuple[Future[JsonValue], bool]:
+        with self.lock:
+            future = self._inflight_requests.get(key)
+            if future is None:
+                future = Future()
+                self._inflight_requests[key] = future
+                return future, True
+
+        return future, False
+
+    def _clear_inflight_request(self, key: str, future: Future[JsonValue]) -> None:
+        with self.lock:
+            if self._inflight_requests.get(key) is future:
+                self._inflight_requests.pop(key, None)
+
+    @staticmethod
+    def _upstream_error_response(error: UpstreamRequestError) -> Response:
+        return Response(
+            error.status or 502,
+            {"error": error.message, "upstreamStatus": error.status},
+        )
+
     def handle_request(
         self,
         method: str,
@@ -1248,7 +1310,7 @@ class BackendApp:
         if parsed_url.path == "/":
             payload: dict[str, Any] = {
                 "ok": True,
-                "service": "front_tg_backend_python",
+                "service": SERVICE_NAME,
                 "message": "Backend is running. Use /api/health or /api/* endpoints.",
                 "healthPath": "/api/health",
             }
@@ -1263,7 +1325,7 @@ class BackendApp:
                 200,
                 {
                     "ok": True,
-                    "service": "front_tg_backend_python",
+                    "service": SERVICE_NAME,
                     "iisBaseUrl": self.config.iis_base_url,
                     "uptimeMs": self.now_ms() - self.started_at_ms,
                     "cacheEntries": self.cache_entries(),
@@ -1286,38 +1348,38 @@ class BackendApp:
         params = {route.query_param: normalized}
         key = cache_key(route.cache_namespace, params)
         now_value = self.now_ms()
-
-        with self.lock:
-            cached = read_fresh_cache(self.store, key, now_value)
+        cached = self._read_fresh_cache(key, now_value)
 
         if cached is not None:
             return Response(200, cached)
 
+        inflight_request, is_leader = self._get_or_create_inflight_request(key)
+
+        if not is_leader:
+            try:
+                return Response(200, inflight_request.result())
+            except UpstreamRequestError as error:
+                return self._upstream_error_response(error)
+
         try:
             payload = self.build_route_payload(route, normalized)
-
-            with self.lock:
-                write_cache(
-                    self.store,
-                    key,
-                    payload,
-                    self.config.cache_ttl_ms,
-                    self.config.stale_ttl_ms,
-                    self.now_ms(),
-                )
-
+            self._write_cached_payload(key, payload)
+            inflight_request.set_result(payload)
             return Response(200, payload)
         except UpstreamRequestError as error:
-            with self.lock:
-                stale_payload = read_stale_cache(self.store, key, self.now_ms())
+            stale_payload = self._read_stale_cache(key, self.now_ms())
 
             if stale_payload is not None:
+                inflight_request.set_result(stale_payload)
                 return Response(200, stale_payload)
 
-            return Response(
-                error.status or 502,
-                {"error": error.message, "upstreamStatus": error.status},
-            )
+            inflight_request.set_exception(error)
+            return self._upstream_error_response(error)
+        except Exception as error:
+            inflight_request.set_exception(error)
+            raise
+        finally:
+            self._clear_inflight_request(key, inflight_request)
 
 
 CORS_HEADERS = {
@@ -1363,14 +1425,18 @@ def encode_response_body(response: Response) -> bytes:
     if response.payload is None:
         return b""
 
-    return json.dumps(response.payload, ensure_ascii=False).encode("utf-8")
+    return json.dumps(
+        response.payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
 
 def build_headers_from_scope(scope: Mapping[str, Any]) -> dict[str, str]:
     raw_headers = scope.get("headers") or []
     headers: dict[str, str] = {}
 
-    if not isinstance(raw_headers, list):
+    if not isinstance(raw_headers, (list, tuple)):
         return headers
 
     for key, value in raw_headers:

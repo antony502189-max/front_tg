@@ -129,7 +129,7 @@ npm run test:backend
 
 - frontend собирается командой `cd frontend && npm ci && npm run build`;
 - frontend публикует именно `frontend/dist`, а не корневой `dist`;
-- frontend использует `VITE_API_BASE_URL=https://front-tg-backend.onrender.com/api`;
+- frontend использует `VITE_API_BASE_URL=https://backend-tg-u57f.onrender.com/api`;
 - frontend использует `HashRouter`, поэтому маршруты работают даже если static site создан вручную без SPA rewrite;
 - backend стартует командой `uvicorn server:app --host 0.0.0.0 --port $PORT`;
 - backend получает базовые env-переменные из `render.yaml`;
@@ -142,8 +142,8 @@ npm run test:backend
 3. Подключи репозиторий и подтверди создание сервисов из `render.yaml`.
 4. Для backend обязательно задай `BOT_TOKEN`, если нужен Telegram-бот.
 5. После первого деплоя проверь:
-   - frontend: `https://front-tg.onrender.com`
-   - backend health: `https://front-tg-backend.onrender.com/api/health`
+   - frontend: `https://frontend-tg.onrender.com`
+   - backend health: `https://backend-tg-u57f.onrender.com/api/health`
 
 Если создаёшь сервисы вручную, для frontend укажи:
 
@@ -152,8 +152,8 @@ npm run test:backend
 
 Важно для Telegram:
 
-- `MINI_APP_URL` у бота должен указывать уже на публичный URL frontend-сервиса Render, например `https://front-tg.onrender.com`;
-- `BACKEND_PUBLIC_URL` должен указывать на публичный URL backend-сервиса, например `https://front-tg-backend.onrender.com`;
+- `MINI_APP_URL` у бота должен указывать уже на публичный URL frontend-сервиса Render, например `https://frontend-tg.onrender.com`;
+- `BACKEND_PUBLIC_URL` должен указывать на публичный URL backend-сервиса, например `https://backend-tg-u57f.onrender.com`;
 - `TELEGRAM_WEBHOOK_SECRET` нужен для проверки заголовка `X-Telegram-Bot-Api-Secret-Token`;
 - backend URL можно открывать как сервисный endpoint: `/api/health` для health-check и `/` для краткого описания сервиса.
 

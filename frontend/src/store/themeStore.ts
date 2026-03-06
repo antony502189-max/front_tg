@@ -47,26 +47,50 @@ const darkDefaults = {
   secondaryBgColor: '#1f2933',
 }
 
+const buildThemeState = (
+  params?: TelegramThemeParams,
+  colorScheme?: ColorScheme,
+) => {
+  const isDark = colorScheme === 'dark'
+  const base = isDark ? darkDefaults : lightDefaults
+
+  return {
+    bgColor: params?.bg_color ?? base.bgColor,
+    textColor: params?.text_color ?? base.textColor,
+    hintColor: params?.hint_color ?? base.hintColor,
+    linkColor: params?.link_color ?? base.linkColor,
+    buttonColor: params?.button_color ?? base.buttonColor,
+    buttonTextColor:
+      params?.button_text_color ?? base.buttonTextColor,
+    secondaryBgColor:
+      params?.secondary_bg_color ?? base.secondaryBgColor,
+    isDark,
+  }
+}
+
+const isSameThemeState = (
+  current: Omit<ThemeState, 'setThemeFromTelegram'>,
+  next: ReturnType<typeof buildThemeState>,
+) =>
+  current.bgColor === next.bgColor &&
+  current.textColor === next.textColor &&
+  current.hintColor === next.hintColor &&
+  current.linkColor === next.linkColor &&
+  current.buttonColor === next.buttonColor &&
+  current.buttonTextColor === next.buttonTextColor &&
+  current.secondaryBgColor === next.secondaryBgColor &&
+  current.isDark === next.isDark
+
 export const useThemeStore = create<ThemeState>((set) => ({
   ...lightDefaults,
   isDark: false,
   setThemeFromTelegram: (params, colorScheme) => {
-    set(() => {
-      const isDark = colorScheme === 'dark'
-      const base = isDark ? darkDefaults : lightDefaults
+    set((state) => {
+      const nextState = buildThemeState(params, colorScheme)
 
-      return {
-        bgColor: params?.bg_color ?? base.bgColor,
-        textColor: params?.text_color ?? base.textColor,
-        hintColor: params?.hint_color ?? base.hintColor,
-        linkColor: params?.link_color ?? base.linkColor,
-        buttonColor: params?.button_color ?? base.buttonColor,
-        buttonTextColor:
-          params?.button_text_color ?? base.buttonTextColor,
-        secondaryBgColor:
-          params?.secondary_bg_color ?? base.secondaryBgColor,
-        isDark,
-      }
+      return isSameThemeState(state, nextState)
+        ? state
+        : nextState
     })
   },
 }))

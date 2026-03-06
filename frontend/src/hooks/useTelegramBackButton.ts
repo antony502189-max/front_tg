@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useEffectEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import WebApp from '@twa-dev/sdk'
 
@@ -21,6 +21,19 @@ export const useTelegramBackButton = (
 ) => {
   const { enabled = true, to, onClick } = options
   const navigate = useNavigate()
+  const handleBackClick = useEffectEvent(() => {
+    if (onClick) {
+      onClick()
+      return
+    }
+
+    if (to) {
+      navigate(to)
+      return
+    }
+
+    navigate(-1)
+  })
 
   useEffect(() => {
     if (!enabled) {
@@ -31,16 +44,7 @@ export const useTelegramBackButton = (
     WebApp.BackButton.show()
 
     const handler = () => {
-      if (onClick) {
-        onClick()
-        return
-      }
-
-      if (to) {
-        navigate(to)
-      } else {
-        navigate(-1)
-      }
+      handleBackClick()
     }
 
     WebApp.BackButton.onClick(handler)
@@ -49,6 +53,6 @@ export const useTelegramBackButton = (
       WebApp.BackButton.offClick(handler)
       WebApp.BackButton.hide()
     }
-  }, [enabled, navigate, onClick, to])
+  }, [enabled])
 }
 

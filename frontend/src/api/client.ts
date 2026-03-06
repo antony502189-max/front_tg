@@ -1,4 +1,7 @@
-import axios, { type InternalAxiosRequestConfig } from 'axios'
+import axios, {
+  type AxiosRequestConfig,
+  type InternalAxiosRequestConfig,
+} from 'axios'
 
 export const DEFAULT_API_TIMEOUT_MS = 10000
 export const LONG_API_TIMEOUT_MS = 30000
@@ -24,7 +27,18 @@ const TUNNEL_ERROR_PATTERNS = [
   'origin has been unregistered',
   'trycloudflare',
 ]
-const RENDER_BACKEND_API_URL = 'https://front-tg-backend.onrender.com/api'
+const RENDER_BACKEND_API_URLS: Record<string, string> = {
+  'frontend-tg.onrender.com': 'https://backend-tg-u57f.onrender.com/api',
+}
+const MAX_RESPONSE_CACHE_ENTRIES = 200
+const responseCache = new Map<
+  string,
+  {
+    expiresAt: number
+    data: unknown
+  }
+>()
+const inflightRequests = new Map<string, Promise<unknown>>()
 
 const getApiBaseUrl = () => {
   const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim()
@@ -43,8 +57,9 @@ const getApiBaseUrl = () => {
     return '/api'
   }
 
-  if (hostname.endsWith('.onrender.com')) {
-    return RENDER_BACKEND_API_URL
+  const renderApiBaseUrl = RENDER_BACKEND_API_URLS[hostname]
+  if (renderApiBaseUrl) {
+    return renderApiBaseUrl
   }
 
   return '/api'
@@ -52,8 +67,53 @@ const getApiBaseUrl = () => {
 
 const apiBaseUrl = getApiBaseUrl()
 
+const buildRequestCacheKey = (
+  url: string,
+  params?: AxiosRequestConfig['params'],
+) => {
+  const normalizedParams =
+    params &&
+    typeof params === 'object' &&
+    !Array.isArray(params)
+      ? new URLSearchParams(
+          Object.entries(params as Record<string, unknown>)
+            .sort(([leftKey], [rightKey]) =>
+              leftKey.localeCompare(rightKey),
+            )
+            .filter(([, value]) => value != null)
+            .map(([key, value]) => [key, String(value)]),
+        ).toString()
+      : ''
+
+  return normalizedParams ? `${url}?${normalizedParams}` : url
+}
+
+const pruneResponseCache = (now: number) => {
+  for (const [cacheKey, cacheEntry] of responseCache.entries()) {
+    if (cacheEntry.expiresAt <= now) {
+      responseCache.delete(cacheKey)
+    }
+  }
+
+  if (responseCache.size <= MAX_RESPONSE_CACHE_ENTRIES) {
+    return
+  }
+
+  for (const cacheKey of responseCache.keys()) {
+    if (responseCache.size <= MAX_RESPONSE_CACHE_ENTRIES) {
+      return
+    }
+
+    responseCache.delete(cacheKey)
+  }
+}
+
 type RetriableRequestConfig = InternalAxiosRequestConfig & {
   retryCount?: number
+}
+
+type ApiGetOptions = Omit<AxiosRequestConfig, 'url' | 'method'> & {
+  cacheTtlMs?: number
 }
 
 export const apiClient = axios.create({
@@ -175,6 +235,60 @@ apiClient.interceptors.response.use(
     return Promise.reject(error)
   },
 )
+
+export const apiGet = async <T>(
+  url: string,
+  {
+    cacheTtlMs = 0,
+    params,
+    ...config
+  }: ApiGetOptions = {},
+): Promise<T> => {
+  const cacheKey =
+    cacheTtlMs > 0 ? buildRequestCacheKey(url, params) : null
+
+  if (cacheKey) {
+    const now = Date.now()
+    pruneResponseCache(now)
+    const cached = responseCache.get(cacheKey)
+
+    if (cached && cached.expiresAt > now) {
+      return cached.data as T
+    }
+
+    const inflight = inflightRequests.get(cacheKey)
+    if (inflight) {
+      return inflight as Promise<T>
+    }
+  }
+
+  const request = apiClient
+    .get<T>(url, {
+      ...config,
+      params,
+    })
+    .then((response) => {
+      if (cacheKey && cacheTtlMs > 0) {
+        responseCache.set(cacheKey, {
+          data: response.data,
+          expiresAt: Date.now() + cacheTtlMs,
+        })
+      }
+
+      return response.data
+    })
+    .finally(() => {
+      if (cacheKey) {
+        inflightRequests.delete(cacheKey)
+      }
+    })
+
+  if (cacheKey) {
+    inflightRequests.set(cacheKey, request)
+  }
+
+  return request
+}
 
 export const getApiErrorMessage = (
   error: unknown,

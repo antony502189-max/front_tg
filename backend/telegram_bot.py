@@ -3,15 +3,25 @@ from __future__ import annotations
 import json
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable, Mapping
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 try:
-    from backend.env import load_project_env
+    from backend.env import (
+        load_project_env,
+        parse_bool_env,
+        parse_number_env,
+        parse_string_env,
+    )
 except ModuleNotFoundError:  # pragma: no cover - fallback for direct script launch
-    from env import load_project_env  # type: ignore
+    from env import (  # type: ignore
+        load_project_env,
+        parse_bool_env,
+        parse_number_env,
+        parse_string_env,
+    )
 
 
 load_project_env()
@@ -22,6 +32,7 @@ SleepFn = Callable[[float], None]
 HeaderMap = Mapping[str, str]
 ALLOWED_UPDATE_TYPES = ["message", "edited_message"]
 WEBHOOK_PATH = "/telegram/webhook"
+START_COMMANDS = frozenset({"/start", "/app", "/help"})
 
 
 class TelegramBotError(Exception):
@@ -29,29 +40,6 @@ class TelegramBotError(Exception):
         super().__init__(message)
         self.message = message
         self.status_code = status_code
-
-
-def parse_number_env(name: str, fallback: int) -> int:
-    raw = os.getenv(name)
-
-    if raw is None:
-        return fallback
-
-    try:
-        parsed = int(raw)
-    except ValueError:
-        return fallback
-
-    return parsed if parsed >= 0 else fallback
-
-
-def parse_bool_env(name: str, fallback: bool) -> bool:
-    raw = os.getenv(name)
-
-    if raw is None:
-        return fallback
-
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 @dataclass(frozen=True)
@@ -69,44 +57,40 @@ class TelegramBotConfig:
     webhook_secret: str | None = None
 
 
-def parse_string_env(name: str) -> str | None:
-    raw = os.getenv(name)
+def _require_string_env(name: str) -> str:
+    value = parse_string_env(name)
 
-    if raw is None:
-        return None
+    if value is None:
+        raise TelegramBotError(f'Missing required env var "{name}"')
 
-    normalized = raw.strip()
-    return normalized or None
+    return value
+
+
+def _read_text_env(name: str, fallback: str) -> str:
+    value = os.getenv(name, fallback).strip()
+    return value or fallback
 
 
 def load_config() -> TelegramBotConfig:
-    bot_token = parse_string_env("BOT_TOKEN") or ""
-    mini_app_url = parse_string_env("MINI_APP_URL") or ""
-
-    if not bot_token:
-        raise TelegramBotError('Missing required env var "BOT_TOKEN"')
-
-    if not mini_app_url:
-        raise TelegramBotError('Missing required env var "MINI_APP_URL"')
-
     return TelegramBotConfig(
-        bot_token=bot_token,
-        mini_app_url=mini_app_url,
-        api_base_url=os.getenv("TELEGRAM_API_BASE_URL", "https://api.telegram.org"),
+        bot_token=_require_string_env("BOT_TOKEN"),
+        mini_app_url=_require_string_env("MINI_APP_URL"),
+        api_base_url=_read_text_env(
+            "TELEGRAM_API_BASE_URL",
+            "https://api.telegram.org",
+        ),
         polling_timeout_s=parse_number_env("TELEGRAM_POLLING_TIMEOUT_S", 25),
         retry_delay_ms=parse_number_env("TELEGRAM_RETRY_DELAY_MS", 1_000),
         drop_pending_updates=parse_bool_env("TELEGRAM_DROP_PENDING_UPDATES", False),
         set_chat_menu_button=parse_bool_env("TELEGRAM_SET_CHAT_MENU_BUTTON", True),
-        button_text=os.getenv(
+        button_text=_read_text_env(
             "TELEGRAM_MINI_APP_BUTTON_TEXT",
             "Открыть мини-приложение",
-        ).strip()
-        or "Открыть мини-приложение",
-        start_text=os.getenv(
+        ),
+        start_text=_read_text_env(
             "TELEGRAM_START_TEXT",
             "Открой приложение по кнопке ниже.",
-        ).strip()
-        or "Открой приложение по кнопке ниже.",
+        ),
         backend_public_url=parse_string_env("BACKEND_PUBLIC_URL"),
         webhook_secret=parse_string_env("TELEGRAM_WEBHOOK_SECRET"),
     )
@@ -118,17 +102,8 @@ def load_webhook_config() -> TelegramBotConfig | None:
     if not backend_public_url:
         return None
 
-    config = load_config()
-    return TelegramBotConfig(
-        bot_token=config.bot_token,
-        mini_app_url=config.mini_app_url,
-        api_base_url=config.api_base_url,
-        polling_timeout_s=config.polling_timeout_s,
-        retry_delay_ms=config.retry_delay_ms,
-        drop_pending_updates=config.drop_pending_updates,
-        set_chat_menu_button=config.set_chat_menu_button,
-        button_text=config.button_text,
-        start_text=config.start_text,
+    return replace(
+        load_config(),
         backend_public_url=backend_public_url,
         webhook_secret=parse_string_env("TELEGRAM_WEBHOOK_SECRET"),
     )
@@ -382,7 +357,7 @@ class TelegramBotApp:
         chat_id, text = context
         command = normalize_command(text)
 
-        if command in {"/start", "/app", "/help"}:
+        if command in START_COMMANDS:
             self.client.send_start_message(chat_id)
 
     def process_updates(self, updates: list[dict[str, Any]]) -> None:

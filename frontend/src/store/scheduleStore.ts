@@ -30,15 +30,22 @@ type ScheduleState = {
   setError: (error: string | null) => void
   setSchedule: (days: ScheduleDay[]) => void
   clearSchedule: () => void
-  getLessonsForDate: (date: string) => Lesson[]
-  getTodayLessons: () => Lesson[]
 }
 
-export const useScheduleStore = create<ScheduleState>((set, get) => ({
+type ScheduleSlice = Pick<
+  ScheduleState,
+  'days' | 'isLoading' | 'error' | 'lessonsByDate'
+>
+
+const defaultState: ScheduleSlice = {
   days: [],
   isLoading: false,
   error: null,
   lessonsByDate: {},
+}
+
+export const useScheduleStore = create<ScheduleState>((set, get) => ({
+  ...defaultState,
   setLoading: (isLoading) => {
     set({ isLoading })
   },
@@ -54,13 +61,19 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
     })
   },
   clearSchedule: () => {
-    set({ days: [], lessonsByDate: {} })
-  },
-  getLessonsForDate: (date) => {
-    return get().lessonsByDate[date] ?? EMPTY_LESSONS
-  },
-  getTodayLessons: () => {
-    return get().getLessonsForDate(toDateKey(new Date()))
+    const { isLoading, error } = get()
+    set({
+      ...defaultState,
+      isLoading,
+      error,
+    })
   },
 }))
+
+export const selectLessonsForDate =
+  (date: string) => (state: ScheduleState) =>
+    state.lessonsByDate[date] ?? EMPTY_LESSONS
+
+export const selectTodayLessons = (state: ScheduleState) =>
+  state.lessonsByDate[toDateKey(new Date())] ?? EMPTY_LESSONS
 

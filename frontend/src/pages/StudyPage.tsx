@@ -1,145 +1,51 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo } from 'react'
 import { fetchGrades, type GradesResponse } from '../api/grades'
 import { getApiErrorMessage } from '../api/client'
+import { useAsyncResource } from '../hooks/useAsyncResource'
 import { useUserStore } from '../store/userStore'
-
-type GradesState = {
-  requestKey: string | null
-  data: GradesResponse | null
-  error: string | null
-}
-
-type SubjectRating = {
-  id: string
-  subject: string
-  teacher: string | undefined
-  average: number
-  marksCount: number
-}
+import {
+  buildSubjectRating,
+  formatMarksLabel,
+  type SubjectRating,
+} from '../utils/study'
 
 const EMPTY_SUBJECTS: GradesResponse['subjects'] = []
-
-const formatMarksLabel = (count: number) => {
-  const remainder100 = count % 100
-
-  if (remainder100 >= 11 && remainder100 <= 14) {
-    return 'оценок'
-  }
-
-  const remainder10 = count % 10
-
-  if (remainder10 === 1) {
-    return 'оценка'
-  }
-
-  if (remainder10 >= 2 && remainder10 <= 4) {
-    return 'оценки'
-  }
-
-  return 'оценок'
-}
-
-const buildSubjectRating = (
-  subjects: GradesResponse['subjects'],
-): SubjectRating[] =>
-  subjects
-    .map((subject) => {
-      const validMarks = subject.marks
-        .map((mark) => mark.value)
-        .filter((value) => Number.isFinite(value))
-
-      if (!validMarks.length) {
-        return null
-      }
-
-      const total = validMarks.reduce(
-        (sum, value) => sum + value,
-        0,
-      )
-
-      return {
-        id: subject.id,
-        subject: subject.subject,
-        teacher: subject.teacher,
-        average: total / validMarks.length,
-        marksCount: validMarks.length,
-      }
-    })
-    .filter((item): item is SubjectRating => item !== null)
-    .sort((left, right) => {
-      if (right.average !== left.average) {
-        return right.average - left.average
-      }
-
-      if (right.marksCount !== left.marksCount) {
-        return right.marksCount - left.marksCount
-      }
-
-      return left.subject.localeCompare(right.subject, 'ru')
-    })
 
 export const StudyPage = () => {
   const studentCardNumber = useUserStore(
     (state) => state.studentCardNumber,
   )
   const normalizedStudentCardNumber = studentCardNumber?.trim() ?? ''
-
-  const [reloadToken, setReloadToken] = useState(0)
-  const [state, setState] = useState<GradesState>({
-    requestKey: null,
-    data: null,
-    error: null,
-  })
   const hasStudentCardNumber = normalizedStudentCardNumber.length > 0
   const requestKey = hasStudentCardNumber
-    ? `${normalizedStudentCardNumber}:${reloadToken}`
+    ? normalizedStudentCardNumber
     : null
-
-  useEffect(() => {
-    if (!requestKey) {
-      return
-    }
-
-    let isCancelled = false
-
-    void fetchGrades(normalizedStudentCardNumber)
-      .then((data) => {
-        if (isCancelled) return
-
-        setState({
-          requestKey,
-          data,
-          error: null,
-        })
-      })
-      .catch((error) => {
-        if (isCancelled) return
-
-        setState({
-          requestKey,
-          data: null,
-          error: getApiErrorMessage(
-            error,
-            'Не удалось загрузить данные об успеваемости.',
-          ),
-        })
-      })
-
-    return () => {
-      isCancelled = true
-    }
-  }, [normalizedStudentCardNumber, requestKey])
-
-  const hasResolvedCurrentRequest = state.requestKey === requestKey
-  const data =
-    hasStudentCardNumber && hasResolvedCurrentRequest
-      ? state.data
-      : null
-  const isLoading = hasStudentCardNumber && !hasResolvedCurrentRequest
-  const error =
-    hasStudentCardNumber && hasResolvedCurrentRequest
-      ? state.error
-      : null
+  const loadGrades = useCallback(
+    (signal: AbortSignal) =>
+      fetchGrades(normalizedStudentCardNumber, signal),
+    [normalizedStudentCardNumber],
+  )
+  const mapGradesError = useCallback(
+    (error: unknown) =>
+      getApiErrorMessage(
+        error,
+        'Не удалось загрузить данные об успеваемости.',
+      ),
+    [],
+  )
+  const {
+    data,
+    error,
+    isLoading,
+    reload,
+    hasResolvedCurrentRequest,
+  } = useAsyncResource<GradesResponse | null>({
+    enabled: hasStudentCardNumber,
+    requestKey,
+    initialData: null,
+    load: loadGrades,
+    getErrorMessage: mapGradesError,
+  })
   const displayMessage = hasStudentCardNumber
     ? error
     : 'Добавьте номер студенческого в настройках, чтобы видеть успеваемость.'
@@ -153,10 +59,6 @@ export const StudyPage = () => {
     () => buildSubjectRating(subjects),
     [subjects],
   )
-
-  const handleRetry = () => {
-    setReloadToken((token) => token + 1)
-  }
 
   return (
     <div className="planner-page">
@@ -185,7 +87,7 @@ export const StudyPage = () => {
               <button
                 type="button"
                 className="study-retry-button"
-                onClick={handleRetry}
+                onClick={reload}
               >
                 Повторить попытку
               </button>

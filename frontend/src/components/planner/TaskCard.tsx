@@ -1,11 +1,12 @@
+import { memo } from 'react'
 import type { Lesson } from '../../store/scheduleStore'
 import type { Task } from '../../store/tasksStore'
 
 type TaskCardProps = {
   task: Task
   boundLesson?: Lesson
-  onToggleDone: () => void
-  onDelete: () => void
+  onToggleDone: (taskId: string) => void
+  onDelete: (taskId: string) => void
 }
 
 const formatDeadline = (deadline: string | null) => {
@@ -23,7 +24,7 @@ const getPriorityLabel = (priority: Task['priority']) => {
   return 'Низкий'
 }
 
-export const TaskCard = ({
+export const TaskCard = memo(({
   task,
   boundLesson,
   onToggleDone,
@@ -45,7 +46,7 @@ export const TaskCard = ({
               ? ' planner-task-checkbox--checked'
               : ''
           }`}
-          onClick={onToggleDone}
+          onClick={() => onToggleDone(task.id)}
         >
           {task.status === 'done' ? '✓' : ''}
         </button>
@@ -82,12 +83,14 @@ export const TaskCard = ({
         <button
           type="button"
           className="planner-task-delete"
-          onClick={onDelete}
+          onClick={() => onDelete(task.id)}
         >
           Удалить
         </button>
       </div>
     </article>
   )
-}
+})
+
+TaskCard.displayName = 'TaskCard'
 

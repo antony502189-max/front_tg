@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 from typing import AbstractSet
 
+TRUE_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
+
 
 def project_root() -> Path:
     return Path(__file__).resolve().parent.parent
@@ -16,6 +18,51 @@ def _normalize_env_value(raw_value: str) -> str:
         return value[1:-1]
 
     return value
+
+
+def parse_string_env(name: str, fallback: str | None = None) -> str | None:
+    raw = os.getenv(name)
+
+    if raw is None:
+        return fallback
+
+    normalized = raw.strip()
+    return normalized or fallback
+
+
+def parse_number_env(name: str, fallback: int, *, minimum: int = 0) -> int:
+    raw = parse_string_env(name)
+
+    if raw is None:
+        return fallback
+
+    try:
+        parsed = int(raw)
+    except ValueError:
+        return fallback
+
+    return parsed if parsed >= minimum else fallback
+
+
+def parse_bool_env(name: str, fallback: bool) -> bool:
+    raw = parse_string_env(name)
+
+    if raw is None:
+        return fallback
+
+    return raw.lower() in TRUE_ENV_VALUES
+
+
+def _should_write_env_value(
+    key: str,
+    *,
+    override: bool,
+    protected_keys: AbstractSet[str],
+) -> bool:
+    if override or key not in os.environ:
+        return True
+
+    return key not in protected_keys
 
 
 def load_env_file(
@@ -50,7 +97,11 @@ def load_env_file(
 
         normalized_value = _normalize_env_value(raw_value)
 
-        if override or normalized_key not in os.environ or normalized_key not in immutable_keys:
+        if _should_write_env_value(
+            normalized_key,
+            override=override,
+            protected_keys=immutable_keys,
+        ):
             os.environ[normalized_key] = normalized_value
 
         loaded[normalized_key] = os.environ[normalized_key]

@@ -1,4 +1,9 @@
-import { useEffect, type ReactElement } from 'react'
+import {
+  Suspense,
+  lazy,
+  useEffect,
+  type ReactElement,
+} from 'react'
 import {
   Navigate,
   Route,
@@ -7,13 +12,42 @@ import {
 } from 'react-router-dom'
 import { useTelegramTheme } from './hooks/useTelegramTheme'
 import { useUserStore } from './store/userStore'
-import { OnboardingPage } from './pages/OnboardingPage'
-import { PlannerPage } from './pages/PlannerPage'
-import { StudyPage } from './pages/StudyPage'
-import { SchedulePage } from './pages/SchedulePage'
-import { UniversityPage } from './pages/UniversityPage'
 import { MainLayout } from './layouts/MainLayout'
-import { SettingsPage } from './pages/SettingsPage'
+
+const OnboardingPage = lazy(() =>
+  import('./pages/OnboardingPage').then((module) => ({
+    default: module.OnboardingPage,
+  })),
+)
+const PlannerPage = lazy(() =>
+  import('./pages/PlannerPage').then((module) => ({
+    default: module.PlannerPage,
+  })),
+)
+const StudyPage = lazy(() =>
+  import('./pages/StudyPage').then((module) => ({
+    default: module.StudyPage,
+  })),
+)
+const SchedulePage = lazy(() =>
+  import('./pages/SchedulePage').then((module) => ({
+    default: module.SchedulePage,
+  })),
+)
+const UniversityPage = lazy(() =>
+  import('./pages/UniversityPage').then((module) => ({
+    default: module.UniversityPage,
+  })),
+)
+const SettingsPage = lazy(() =>
+  import('./pages/SettingsPage').then((module) => ({
+    default: module.SettingsPage,
+  })),
+)
+
+const RouteFallback = () => (
+  <div className="app-route-fallback" aria-hidden="true" />
+)
 
 type RequireOnboardedProps = {
   children: ReactElement
@@ -64,37 +98,39 @@ function App() {
 
   return (
     <div className="app-root">
-      <Routes>
-        <Route path="/onboarding" element={<OnboardingPage />} />
-        <Route
-          path="/app/*"
-          element={
-            <RequireOnboarded>
-              <MainLayout />
-            </RequireOnboarded>
-          }
-        >
+      <Suspense fallback={<RouteFallback />}>
+        <Routes>
+          <Route path="/onboarding" element={<OnboardingPage />} />
           <Route
-            index
-            element={<Navigate to="planner" replace />}
+            path="/app/*"
+            element={
+              <RequireOnboarded>
+                <MainLayout />
+              </RequireOnboarded>
+            }
+          >
+            <Route
+              index
+              element={<Navigate to="planner" replace />}
+            />
+            <Route path="planner" element={<PlannerPage />} />
+            <Route path="study" element={<StudyPage />} />
+            <Route path="schedule" element={<SchedulePage />} />
+            <Route path="univer" element={<UniversityPage />} />
+            <Route path="settings" element={<SettingsPage />} />
+          </Route>
+          <Route
+            path="*"
+            element={
+              isOnboarded ? (
+                <Navigate to="/app/planner" replace />
+              ) : (
+                <Navigate to="/onboarding" replace />
+              )
+            }
           />
-          <Route path="planner" element={<PlannerPage />} />
-          <Route path="study" element={<StudyPage />} />
-          <Route path="schedule" element={<SchedulePage />} />
-          <Route path="univer" element={<UniversityPage />} />
-          <Route path="settings" element={<SettingsPage />} />
-        </Route>
-        <Route
-          path="*"
-          element={
-            isOnboarded ? (
-              <Navigate to="/app/planner" replace />
-            ) : (
-              <Navigate to="/onboarding" replace />
-            )
-          }
-        />
-      </Routes>
+        </Routes>
+      </Suspense>
     </div>
   )
 }

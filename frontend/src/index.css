@@ -54,6 +54,21 @@ body {
   padding: 12px;
 }
 
+.app-route-fallback {
+  width: 100%;
+  max-width: 520px;
+  min-height: 60vh;
+  border-radius: 20px;
+  background: linear-gradient(
+    90deg,
+    rgba(148, 163, 184, 0.16),
+    rgba(148, 163, 184, 0.08),
+    rgba(148, 163, 184, 0.16)
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.2s ease-in-out infinite;
+}
+
 .onboarding-page {
   width: 100%;
   display: flex;

@@ -1,4 +1,8 @@
-import { type PropsWithChildren, useEffect } from 'react'
+import {
+  type PropsWithChildren,
+  useEffect,
+  useEffectEvent,
+} from 'react'
 import WebApp from '@twa-dev/sdk'
 import { useThemeStore } from '../store/themeStore'
 
@@ -6,14 +10,16 @@ export const TelegramProvider = ({ children }: PropsWithChildren) => {
   const setThemeFromTelegram = useThemeStore(
     (state) => state.setThemeFromTelegram,
   )
+  const syncTheme = useEffectEvent(() => {
+    setThemeFromTelegram(WebApp.themeParams, WebApp.colorScheme)
+  })
 
   useEffect(() => {
     WebApp.ready()
-
-    setThemeFromTelegram(WebApp.themeParams, WebApp.colorScheme)
+    syncTheme()
 
     const handleThemeChanged = () => {
-      setThemeFromTelegram(WebApp.themeParams, WebApp.colorScheme)
+      syncTheme()
     }
 
     WebApp.onEvent('themeChanged', handleThemeChanged)

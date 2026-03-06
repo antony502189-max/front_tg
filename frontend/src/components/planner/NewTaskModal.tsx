@@ -1,6 +1,9 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { useState, type FormEvent } from 'react'
-import { useScheduleStore } from '../../store/scheduleStore'
+import {
+  selectTodayLessons,
+  useScheduleStore,
+} from '../../store/scheduleStore'
 import { useTasksStore, type TaskPriority } from '../../store/tasksStore'
 
 type NewTaskModalProps = {
@@ -10,9 +13,7 @@ type NewTaskModalProps = {
 
 export const NewTaskModal = ({ isOpen, onClose }: NewTaskModalProps) => {
   const addTask = useTasksStore((state) => state.addTask)
-  const todayLessons = useScheduleStore((state) =>
-    state.getTodayLessons(),
-  )
+  const todayLessons = useScheduleStore(selectTodayLessons)
 
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')

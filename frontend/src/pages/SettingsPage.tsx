@@ -1,81 +1,77 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useShallow } from 'zustand/react/shallow'
 import { useTelegramBackButton } from '../hooks/useTelegramBackButton'
+import {
+  GROUP_LENGTH,
+  STUDENT_CARD_MIN_LENGTH,
+  useStudentProfileForm,
+} from '../hooks/useStudentProfileForm'
 import { useUserStore, type Subgroup } from '../store/userStore'
 
-const GROUP_LENGTH = 6
-const STUDENT_CARD_MIN_LENGTH = 4
-const STUDENT_CARD_MAX_LENGTH = 32
+const SUBGROUP_OPTIONS: { value: Subgroup; label: string }[] = [
+  { value: 'all', label: 'Все' },
+  { value: '1', label: '1' },
+  { value: '2', label: '2' },
+]
 
 export const SettingsPage = () => {
   const navigate = useNavigate()
 
   useTelegramBackButton()
 
-  const initialGroupNumber = useUserStore((state) => state.groupNumber)
-  const initialCardNumber = useUserStore(
-    (state) => state.studentCardNumber,
+  const {
+    initialGroupNumber,
+    initialCardNumber,
+    subgroup,
+    setOnboardingData,
+    setSubgroup,
+    resetUser,
+  } = useUserStore(
+    useShallow((state) => ({
+      initialGroupNumber: state.groupNumber,
+      initialCardNumber: state.studentCardNumber,
+      subgroup: state.subgroup,
+      setOnboardingData: state.setOnboardingData,
+      setSubgroup: state.setSubgroup,
+      resetUser: state.resetUser,
+    })),
   )
-  const subgroup = useUserStore((state) => state.subgroup)
-  const setOnboardingData = useUserStore(
-    (state) => state.setOnboardingData,
-  )
-  const setSubgroup = useUserStore((state) => state.setSubgroup)
-  const resetUser = useUserStore((state) => state.resetUser)
-
-  const [groupNumber, setGroupNumber] = useState(
-    initialGroupNumber ?? '',
-  )
-  const [studentCardNumber, setStudentCardNumber] = useState(
-    initialCardNumber ?? '',
-  )
-  const [touched, setTouched] = useState({
-    group: false,
-    card: false,
-  })
-
-  const isGroupValid = useMemo(
-    () => groupNumber.length === GROUP_LENGTH,
-    [groupNumber],
-  )
-  const isCardValid = useMemo(
-    () =>
-      studentCardNumber.trim().length >= STUDENT_CARD_MIN_LENGTH,
-    [studentCardNumber],
-  )
-  const isFormValid = isGroupValid && isCardValid
-
-  const handleGroupChange = (value: string) => {
-    const numeric = value.replace(/\D/g, '').slice(0, GROUP_LENGTH)
-    setGroupNumber(numeric)
-  }
-
-  const handleCardChange = (value: string) => {
-    setStudentCardNumber(value.slice(0, STUDENT_CARD_MAX_LENGTH))
-  }
-
-  const handleSubmit = (event: FormEvent) => {
-    event.preventDefault()
-    setTouched({ group: true, card: true })
-
-    if (!isFormValid) {
-      return
-    }
-
-    setOnboardingData({
+  const handleProfileSubmit = useCallback(
+    ({
       groupNumber,
       studentCardNumber,
-    })
-  }
-
-  const handleSubgroupChange = (value: Subgroup) => {
-    setSubgroup(value)
-  }
-
-  const handleReset = () => {
+    }: {
+      groupNumber: string
+      studentCardNumber: string
+    }) => {
+      setOnboardingData({
+        groupNumber,
+        studentCardNumber,
+      })
+    },
+    [setOnboardingData],
+  )
+  const {
+    groupNumber,
+    studentCardNumber,
+    touched,
+    isGroupValid,
+    isCardValid,
+    isFormValid,
+    updateGroupNumber,
+    updateStudentCardNumber,
+    markFieldTouched,
+    handleSubmit,
+  } = useStudentProfileForm({
+    initialGroupNumber,
+    initialStudentCardNumber: initialCardNumber,
+    onSubmit: handleProfileSubmit,
+  })
+  const handleReset = useCallback(() => {
     resetUser()
     navigate('/onboarding', { replace: true })
-  }
+  }, [navigate, resetUser])
 
   return (
     <div className="planner-page">
@@ -115,11 +111,9 @@ export const SettingsPage = () => {
                 placeholder="Например, 123456"
                 value={groupNumber}
                 onChange={(event) =>
-                  handleGroupChange(event.target.value)
+                  updateGroupNumber(event.target.value)
                 }
-                onBlur={() =>
-                  setTouched((prev) => ({ ...prev, group: true }))
-                }
+                onBlur={() => markFieldTouched('group')}
               />
               {touched.group && !isGroupValid ? (
                 <p className="onboarding-error">
@@ -152,11 +146,9 @@ export const SettingsPage = () => {
                 placeholder="Как в IIS, например 12345678"
                 value={studentCardNumber}
                 onChange={(event) =>
-                  handleCardChange(event.target.value)
+                  updateStudentCardNumber(event.target.value)
                 }
-                onBlur={() =>
-                  setTouched((prev) => ({ ...prev, card: true }))
-                }
+                onBlur={() => markFieldTouched('card')}
               />
               {touched.card && !isCardValid ? (
                 <p className="onboarding-error">
@@ -185,11 +177,7 @@ export const SettingsPage = () => {
         <section className="settings-section">
           <h2 className="settings-section-title">Подгруппа</h2>
           <div className="settings-subgroup-toggle" role="radiogroup">
-            {([
-              { value: 'all', label: 'Все' },
-              { value: '1', label: '1' },
-              { value: '2', label: '2' },
-            ] as { value: Subgroup; label: string }[]).map((item) => {
+            {SUBGROUP_OPTIONS.map((item) => {
               const isActive = subgroup === item.value
               return (
                 <button
@@ -202,7 +190,7 @@ export const SettingsPage = () => {
                       ? ' settings-subgroup-button--active'
                       : ''
                   }`}
-                  onClick={() => handleSubgroupChange(item.value)}
+                  onClick={() => setSubgroup(item.value)}
                 >
                   {item.label}
                 </button>
