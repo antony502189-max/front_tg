@@ -1,10 +1,12 @@
 import axios from 'axios'
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? '/api'
+export const DEFAULT_API_TIMEOUT_MS = 10000
+export const LONG_API_TIMEOUT_MS = 30000
 
 export const apiClient = axios.create({
   baseURL: apiBaseUrl,
-  timeout: 10000,
+  timeout: DEFAULT_API_TIMEOUT_MS,
 })
 
 apiClient.interceptors.response.use(
@@ -23,6 +25,13 @@ export const getApiErrorMessage = (
   fallback: string,
 ): string => {
   if (axios.isAxiosError(error)) {
+    if (
+      error.code === 'ECONNABORTED' ||
+      error.message?.toLowerCase().includes('timeout')
+    ) {
+      return 'Система отвечает слишком долго. Попробуйте ещё раз через несколько секунд.'
+    }
+
     const payload = error.response?.data
 
     if (typeof payload === 'string' && payload.trim()) {

@@ -1,11 +1,13 @@
 import unittest
 from datetime import date
+from threading import Event, Lock
 
 from backend.server import (
     BackendApp,
     CacheEntry,
     UpstreamRequestError,
     cache_key,
+    fetch_with_retry,
     normalize_auditories_response,
     normalize_employees_response,
     extract_grade_subjects,
@@ -122,6 +124,44 @@ class BackendServerTests(unittest.TestCase):
         self.assertIsNotNone(read_fresh_cache(store, key, 102))
         self.assertIsNotNone(read_stale_cache(store, key, 108))
         self.assertIsNone(read_stale_cache(store, key, 116))
+
+    def test_fetch_with_retry_does_not_retry_timeout_errors(self) -> None:
+        attempts = {"value": 0}
+
+        def fetcher(_path: str, _params: dict[str, str]):
+            attempts["value"] += 1
+            raise UpstreamRequestError("The read operation timed out")
+
+        with self.assertRaises(UpstreamRequestError):
+            fetch_with_retry(
+                fetcher,
+                "/rating/studentRating",
+                {"studentCardNumber": "123"},
+                max_retries=2,
+                retry_delay_ms=1,
+            )
+
+        self.assertEqual(attempts["value"], 1)
+
+    def test_fetch_with_retry_retries_server_errors(self) -> None:
+        attempts = {"value": 0}
+
+        def fetcher(_path: str, _params: dict[str, str]):
+            attempts["value"] += 1
+            if attempts["value"] < 3:
+                raise UpstreamRequestError("server unavailable", status=503)
+            return {"ok": True}
+
+        payload = fetch_with_retry(
+            fetcher,
+            "/schedule",
+            {"studentGroup": "353502"},
+            max_retries=2,
+            retry_delay_ms=1,
+        )
+
+        self.assertEqual(payload, {"ok": True})
+        self.assertEqual(attempts["value"], 3)
 
     def test_normalize_schedule_response_maps_current_week(self) -> None:
         payload = {
@@ -369,6 +409,57 @@ class BackendServerTests(unittest.TestCase):
         self.assertEqual(subjects[0]["teacher"], "Иванов И.И.")
         self.assertEqual(subjects[0]["marks"], [{"value": 9.0}, {"value": 8.0}])
 
+    def test_extract_grade_subjects_aggregates_lesson_marks_payload(self) -> None:
+        payload = {
+            "lessons": [
+                {
+                    "id": 1,
+                    "lessonNameAbbrev": "МА",
+                    "lessonTypeAbbrev": "ПЗ",
+                    "dateString": "13.02.2026",
+                    "marks": [8],
+                },
+                {
+                    "id": 2,
+                    "lessonNameAbbrev": "МА",
+                    "lessonTypeAbbrev": "ПЗ",
+                    "dateString": "16.02.2026",
+                    "marks": [10],
+                },
+                {
+                    "id": 3,
+                    "lessonNameAbbrev": "Физика",
+                    "lessonTypeAbbrev": "ПЗ",
+                    "dateString": "19.02.2026",
+                    "marks": [9],
+                },
+                {
+                    "id": 4,
+                    "lessonNameAbbrev": "Логика",
+                    "lessonTypeAbbrev": "ЛК",
+                    "dateString": "20.02.2026",
+                    "marks": [],
+                },
+            ]
+        }
+
+        subjects = extract_grade_subjects(payload)
+
+        self.assertEqual(len(subjects), 2)
+        self.assertEqual(subjects[0]["subject"], "МА")
+        self.assertEqual(
+            subjects[0]["marks"],
+            [
+                {"value": 8.0, "date": "13.02.2026"},
+                {"value": 10.0, "date": "16.02.2026"},
+            ],
+        )
+        self.assertEqual(subjects[1]["subject"], "Физика")
+        self.assertEqual(
+            subjects[1]["marks"],
+            [{"value": 9.0, "date": "19.02.2026"}],
+        )
+
     def test_grades_route_handles_partial_upstream_failure(self) -> None:
         def fetcher(path: str, _params: dict[str, str]):
             if path == "/rating/studentSearch":
@@ -396,6 +487,92 @@ class BackendServerTests(unittest.TestCase):
         self.assertEqual(response.payload["subjects"][0]["subject"], "Математика")
         self.assertEqual(response.payload["subjects"][0]["teacher"], "Иванов И.И.")
         self.assertEqual(len(response.payload["subjects"][0]["marks"]), 2)
+
+    def test_grades_route_requests_upstream_sources_in_parallel(self) -> None:
+        release = Event()
+        seen_paths: list[str] = []
+        seen_lock = Lock()
+
+        def fetcher(path: str, _params: dict[str, str]):
+            with seen_lock:
+                seen_paths.append(path)
+                if len(seen_paths) == 2:
+                    release.set()
+
+            if not release.wait(timeout=0.1):
+                self.fail("grades upstream requests were started sequentially")
+
+            if path == "/rating/studentSearch":
+                return {
+                    "studentCardNumber": "123",
+                    "averageMark": 8.4,
+                }
+
+            if path == "/rating/studentRating":
+                return {
+                    "subjects": [
+                        {
+                            "id": "math",
+                            "subject": "Math",
+                            "marks": [{"value": 9}],
+                        }
+                    ]
+                }
+
+            raise AssertionError(f"Unexpected path: {path}")
+
+        app = BackendApp(config=TEST_CONFIG, fetcher=fetcher)
+
+        response = app.handle_request("GET", "/api/grades?studentCardNumber=123")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertCountEqual(
+            seen_paths,
+            ["/rating/studentSearch", "/rating/studentRating"],
+        )
+        self.assertEqual(response.payload["subjects"][0]["subject"], "Math")
+
+    def test_grades_route_returns_marks_from_lessons_payload(self) -> None:
+        def fetcher(path: str, _params: dict[str, str]):
+            if path == "/rating/studentSearch":
+                raise UpstreamRequestError("The read operation timed out")
+
+            if path == "/rating/studentRating":
+                return {
+                    "id": 559394,
+                    "lessons": [
+                        {
+                            "id": 1,
+                            "lessonNameAbbrev": "МА",
+                            "dateString": "13.02.2026",
+                            "marks": [8],
+                        },
+                        {
+                            "id": 2,
+                            "lessonNameAbbrev": "МА",
+                            "dateString": "16.02.2026",
+                            "marks": [10],
+                        },
+                    ],
+                }
+
+            raise AssertionError(f"Unexpected path: {path}")
+
+        app = BackendApp(config=TEST_CONFIG, fetcher=fetcher)
+
+        response = app.handle_request("GET", "/api/grades?studentCardNumber=56841006")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.payload["summary"])
+        self.assertEqual(len(response.payload["subjects"]), 1)
+        self.assertEqual(response.payload["subjects"][0]["subject"], "МА")
+        self.assertEqual(
+            response.payload["subjects"][0]["marks"],
+            [
+                {"value": 8.0, "date": "13.02.2026"},
+                {"value": 10.0, "date": "16.02.2026"},
+            ],
+        )
 
     def test_grades_route_prefers_not_found_message_for_unknown_student_card(self) -> None:
         def fetcher(path: str, _params: dict[str, str]):

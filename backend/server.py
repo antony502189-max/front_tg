@@ -4,7 +4,8 @@ import json
 import math
 import os
 import time
-from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock
@@ -59,6 +60,8 @@ RUSSIAN_WEEKDAY_TO_INDEX = {
     "Пятница": 4,
     "Суббота": 5,
 }
+
+GRADES_SEARCH_TIMEOUT_MS = 2_500
 
 
 def parse_number_env(name: str, fallback: int) -> int:
@@ -231,7 +234,21 @@ def route_config(pathname: str) -> RouteConfig | None:
 
 
 def should_retry(error: UpstreamRequestError) -> bool:
-    return error.status is None or error.status >= 500 or error.status == 429
+    if error.status == 429:
+        return True
+
+    if error.status is not None:
+        return error.status >= 500
+
+    normalized_message = error.message.lower()
+    timeout_markers = (
+        "timed out",
+        "timeout",
+        "время ожидания",
+        "time out",
+    )
+
+    return not any(marker in normalized_message for marker in timeout_markers)
 
 
 def extract_error_message(raw_body: bytes) -> str:
@@ -279,6 +296,10 @@ def create_fetcher(config: AppConfig) -> Fetcher:
         except HTTPError as error:
             message = extract_error_message(error.read())
             raise UpstreamRequestError(message=message, status=error.code) from error
+        except TimeoutError as error:
+            raise UpstreamRequestError(
+                message=str(error) or "Upstream API request timed out"
+            ) from error
         except URLError as error:
             raise UpstreamRequestError(
                 message=str(error.reason or "Upstream API request failed")
@@ -720,6 +741,82 @@ def unwrap_grade_payload(payload: Any) -> Any:
 def extract_grade_subjects(payload: Any) -> list[dict[str, Any]]:
     candidates = unwrap_grade_payload(payload)
     if isinstance(candidates, dict):
+        lesson_items = candidates.get("lessons")
+        if isinstance(lesson_items, list):
+            grouped_subjects: dict[str, dict[str, Any]] = {}
+
+            for index, item in enumerate(lesson_items):
+                if not isinstance(item, dict):
+                    continue
+
+                raw_marks = item.get("marks")
+                marks = []
+                if isinstance(raw_marks, list):
+                    for raw_mark in raw_marks:
+                        normalized_mark = normalize_mark(raw_mark)
+                        if normalized_mark is None:
+                            continue
+
+                        if "date" not in normalized_mark:
+                            lesson_date = first_non_empty_string(
+                                item.get("dateString"),
+                                item.get("date"),
+                            )
+                            if lesson_date is not None:
+                                normalized_mark["date"] = lesson_date
+
+                        marks.append(normalized_mark)
+
+                if not marks:
+                    average_mark = first_finite_number(
+                        item.get("averageMark"),
+                        item.get("avgMark"),
+                        item.get("mark"),
+                        item.get("value"),
+                    )
+                    if average_mark is not None:
+                        mark: dict[str, Any] = {"value": average_mark}
+                        lesson_date = first_non_empty_string(
+                            item.get("dateString"),
+                            item.get("date"),
+                        )
+                        if lesson_date is not None:
+                            mark["date"] = lesson_date
+                        marks.append(mark)
+
+                if not marks:
+                    continue
+
+                subject_name = first_non_empty_string(
+                    item.get("lessonName"),
+                    item.get("lessonNameFull"),
+                    item.get("lessonNameAbbrev"),
+                    item.get("subject"),
+                    item.get("discipline"),
+                    item.get("disciplineName"),
+                    item.get("name"),
+                    item.get("title"),
+                ) or "Дисциплина"
+                subject_key = normalize_lookup_value(subject_name) or str(index)
+
+                if subject_key not in grouped_subjects:
+                    grouped_subjects[subject_key] = {
+                        "id": str(item.get("id", subject_key)),
+                        "subject": subject_name,
+                        "teacher": first_non_empty_string(
+                            item.get("teacher"),
+                            item.get("employee"),
+                            item.get("fio"),
+                        ),
+                        "marks": [],
+                    }
+
+                grouped_subjects[subject_key]["marks"].extend(marks)
+
+            result = list(grouped_subjects.values())
+            result.sort(key=lambda item: item["subject"])
+            return result
+
         candidates = (
             candidates.get("subjects")
             or candidates.get("disciplines")
@@ -862,6 +959,7 @@ class BackendApp:
         self.config = self._resolve_config(config)
         self.store = {} if store is None else store
         self.fetcher = fetcher or create_fetcher(self.config)
+        self.uses_default_fetcher = fetcher is None
         self.now_ms = now_ms or (lambda: int(time.time() * 1000))
         self.today = today or (lambda: datetime.now().date())
         self.started_at_ms = self.now_ms()
@@ -883,6 +981,32 @@ class BackendApp:
             path,
             params,
             self.config.max_retries,
+            self.config.retry_delay_ms,
+        )
+
+    def request_upstream_with_timeout(
+        self,
+        path: str,
+        params: dict[str, str],
+        *,
+        timeout_ms: int,
+        max_retries: int,
+    ) -> JsonValue:
+        fetcher = (
+            create_fetcher(
+                replace(
+                    self.config,
+                    request_timeout_ms=max(timeout_ms, 1),
+                )
+            )
+            if self.uses_default_fetcher
+            else self.fetcher
+        )
+        return fetch_with_retry(
+            fetcher,
+            path,
+            params,
+            max_retries,
             self.config.retry_delay_ms,
         )
 
@@ -918,21 +1042,50 @@ class BackendApp:
         search_error: UpstreamRequestError | None = None
         rating_error: UpstreamRequestError | None = None
 
-        try:
-            search_payload = self.request_upstream(
+        requests = {
+            "search": (
                 "/rating/studentSearch",
                 {"studentCardNumber": query_value},
-            )
-        except UpstreamRequestError as error:
-            search_error = error
-
-        try:
-            rating_payload = self.request_upstream(
+            ),
+            "rating": (
                 "/rating/studentRating",
                 {"studentCardNumber": query_value},
-            )
-        except UpstreamRequestError as error:
-            rating_error = error
+            ),
+        }
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = {
+                "search": executor.submit(
+                    self.request_upstream_with_timeout,
+                    requests["search"][0],
+                    requests["search"][1],
+                    timeout_ms=min(
+                        self.config.request_timeout_ms,
+                        GRADES_SEARCH_TIMEOUT_MS,
+                    ),
+                    max_retries=0,
+                ),
+                "rating": executor.submit(
+                    self.request_upstream,
+                    requests["rating"][0],
+                    requests["rating"][1],
+                ),
+            }
+
+            for key, future in futures.items():
+                try:
+                    result = future.result()
+                except UpstreamRequestError as error:
+                    if key == "search":
+                        search_error = error
+                    else:
+                        rating_error = error
+                    continue
+
+                if key == "search":
+                    search_payload = result
+                else:
+                    rating_payload = result
 
         if search_payload is None and rating_payload is None:
             if search_error is not None and search_error.status == 404:
