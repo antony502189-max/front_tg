@@ -1154,6 +1154,17 @@ class BackendApp:
 
         parsed_url = urlparse(raw_path)
 
+        if parsed_url.path == "/":
+            return Response(
+                200,
+                {
+                    "ok": True,
+                    "service": "front_tg_backend_python",
+                    "message": "Backend is running. Use /api/health or /api/* endpoints.",
+                    "healthPath": "/api/health",
+                },
+            )
+
         if parsed_url.path == "/api/health":
             return Response(
                 200,

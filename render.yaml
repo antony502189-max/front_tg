@@ -1,6 +1,19 @@
 services:
   - type: web
-    name: bsuir-nexus-backend
+    name: front-tg-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://front-tg-backend.onrender.com/api
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+  - type: web
+    name: front-tg-backend
     runtime: python
     buildCommand: pip install -r backend/requirements.txt
     startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT

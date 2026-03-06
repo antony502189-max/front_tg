@@ -70,6 +70,15 @@ class BackendServerTests(unittest.TestCase):
         payload = json.loads(messages[1]["body"])
         self.assertTrue(payload["ok"])
 
+    def test_root_request_returns_service_info(self) -> None:
+        app = BackendApp(config=TEST_CONFIG, fetcher=lambda *_: {})
+
+        response = app.handle_request("GET", "/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.payload["ok"])
+        self.assertEqual(response.payload["healthPath"], "/api/health")
+
     def test_route_config_resolves_known_routes(self) -> None:
         self.assertEqual(route_config("/api/schedule").cache_namespace, "/schedule")
         self.assertEqual(route_config("/api/grades").query_param, "studentCardNumber")

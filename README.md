@@ -111,13 +111,27 @@ npm run test:backend
 
 ## Render
 
-Для деплоя backend на Render в репозитории теперь есть:
+Для нормального деплоя Mini App на Render проект лучше поднимать как **2 сервиса**:
 
-- `render.yaml` — Blueprint для Render Web Service;
+- `front-tg-frontend` — `Static Site` для Vite frontend;
+- `front-tg-backend` — `Web Service` для Python backend.
+
+В репозитории для этого есть:
+
+- `render.yaml` — Blueprint сразу для двух Render-сервисов;
 - `backend/requirements.txt` — файл Python-зависимостей;
 - `.python-version` — фиксирует ветку Python `3.13`.
 
-Для Render backend теперь можно запускать как ASGI-приложение командой `uvicorn server:app --host 0.0.0.0 --port $PORT`. При этом локальный запуск через `python -m backend.server` тоже сохраняется.
+Что делает blueprint:
+
+- frontend собирается из `frontend/` как static site;
+- frontend использует `VITE_API_BASE_URL=https://front-tg-backend.onrender.com/api`;
+- backend стартует командой `uvicorn server:app --host 0.0.0.0 --port $PORT`.
+
+Важно для Telegram:
+
+- `MINI_APP_URL` у бота должен указывать уже на публичный URL frontend-сервиса Render, например `https://front-tg-frontend.onrender.com`;
+- backend URL можно открывать как сервисный endpoint: `/api/health` для health-check и `/` для краткого описания сервиса.
 
 ## Переменные окружения
 
