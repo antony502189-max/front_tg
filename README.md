@@ -34,6 +34,10 @@ Backend поднимается локально на `http://localhost:8787`, Vi
 
 ```text
 .
+|-- frontend
+|   |-- public
+|   |-- src
+|   `-- index.html
 |-- backend
 |   |-- env.py
 |   |-- server.py
@@ -41,20 +45,7 @@ Backend поднимается локально на `http://localhost:8787`, Vi
 |   |-- telegram_bot.py
 |   |-- telegram_bot_test.py
 |   `-- __init__.py
-|-- public
-|-- src
-|   |-- api
-|   |-- assets
-|   |-- components
-|   |-- hooks
-|   |-- layouts
-|   |-- pages
-|   |-- store
-|   |-- types
-|   |-- utils
-|   `-- telegram
 |-- .env.example
-|-- index.html
 |-- package.json
 |-- postcss.config.cjs
 |-- tailwind.config.cjs
@@ -63,7 +54,7 @@ Backend поднимается локально на `http://localhost:8787`, Vi
 ```
 
 Что где лежит:
-- `src/` — весь frontend.
+- `frontend/` — весь frontend: `src/`, `public/`, `index.html`.
 - `backend/` — Python backend, загрузка `.env` и Telegram-обёртка.
 - корневые конфиги остаются в корне, потому что их так ожидают Vite, TypeScript и npm.
 

@@ -17,6 +17,8 @@ type SubjectRating = {
   marksCount: number
 }
 
+const EMPTY_SUBJECTS: GradesResponse['subjects'] = []
+
 const formatMarksLabel = (count: number) => {
   const remainder100 = count % 100
 
@@ -36,6 +38,45 @@ const formatMarksLabel = (count: number) => {
 
   return 'оценок'
 }
+
+const buildSubjectRating = (
+  subjects: GradesResponse['subjects'],
+): SubjectRating[] =>
+  subjects
+    .map((subject) => {
+      const validMarks = subject.marks
+        .map((mark) => mark.value)
+        .filter((value) => Number.isFinite(value))
+
+      if (!validMarks.length) {
+        return null
+      }
+
+      const total = validMarks.reduce(
+        (sum, value) => sum + value,
+        0,
+      )
+
+      return {
+        id: subject.id,
+        subject: subject.subject,
+        teacher: subject.teacher,
+        average: total / validMarks.length,
+        marksCount: validMarks.length,
+      }
+    })
+    .filter((item): item is SubjectRating => item !== null)
+    .sort((left, right) => {
+      if (right.average !== left.average) {
+        return right.average - left.average
+      }
+
+      if (right.marksCount !== left.marksCount) {
+        return right.marksCount - left.marksCount
+      }
+
+      return left.subject.localeCompare(right.subject, 'ru')
+    })
 
 export const StudyPage = () => {
   const studentCardNumber = useUserStore(
@@ -105,46 +146,11 @@ export const StudyPage = () => {
   const canRenderResults =
     hasStudentCardNumber && hasResolvedCurrentRequest && !error
   const summary = data?.summary
-  const subjects = data?.subjects ?? []
+  const subjects = data?.subjects ?? EMPTY_SUBJECTS
   const warning = data?.warning
   const hasSubjects = subjects.length > 0
   const subjectRating = useMemo<SubjectRating[]>(
-    () =>
-      subjects
-        .map((subject) => {
-          const validMarks = subject.marks
-            .map((mark) => mark.value)
-            .filter((value) => Number.isFinite(value))
-
-          if (!validMarks.length) {
-            return null
-          }
-
-          const total = validMarks.reduce(
-            (sum, value) => sum + value,
-            0,
-          )
-
-          return {
-            id: subject.id,
-            subject: subject.subject,
-            teacher: subject.teacher,
-            average: total / validMarks.length,
-            marksCount: validMarks.length,
-          }
-        })
-        .filter((item): item is SubjectRating => item !== null)
-        .sort((left, right) => {
-          if (right.average !== left.average) {
-            return right.average - left.average
-          }
-
-          if (right.marksCount !== left.marksCount) {
-            return right.marksCount - left.marksCount
-          }
-
-          return left.subject.localeCompare(right.subject, 'ru')
-        }),
+    () => buildSubjectRating(subjects),
     [subjects],
   )
 
