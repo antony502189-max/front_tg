@@ -8,9 +8,9 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "dev:backend": "python -m backend.server",
-    "dev:bot": "python -m backend.telegram_bot",
-    "test:backend": "python -m unittest -v backend.server_test backend.telegram_bot_test backend.env_test"
+    "dev:backend": "cd .. && python -m backend.server",
+    "dev:bot": "cd .. && python -m backend.telegram_bot",
+    "test:backend": "cd .. && python -m unittest -v backend.server_test backend.telegram_bot_test backend.env_test"
   },
   "dependencies": {
     "@twa-dev/sdk": "^8.0.2",

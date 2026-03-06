@@ -5,6 +5,12 @@ export const DEFAULT_API_TIMEOUT_MS = 10000
 export const LONG_API_TIMEOUT_MS = 30000
 const MAX_API_RETRIES = 2
 const API_RETRY_DELAY_MS = 750
+const REQUEST_TIMEOUT_ERROR_MESSAGE =
+  'Система отвечает слишком долго. Попробуйте ещё раз через несколько секунд.'
+const TUNNEL_CONNECTION_ERROR_MESSAGE =
+  'Соединение с мини-приложением временно прервалось. Попробуйте ещё раз через несколько секунд.'
+const TRANSIENT_API_ERROR_MESSAGE =
+  'Сервис временно недоступен. Попробуйте ещё раз через несколько секунд.'
 const TRANSIENT_API_STATUS_CODES = new Set([
   502,
   503,
@@ -40,6 +46,45 @@ const includesTunnelError = (value: string) => {
   return TUNNEL_ERROR_PATTERNS.some((pattern) =>
     normalizedValue.includes(pattern),
   )
+}
+
+const normalizeApiMessage = (message: string | null) => {
+  if (!message) {
+    return null
+  }
+
+  const normalizedMessage = message.trim()
+
+  if (!normalizedMessage) {
+    return null
+  }
+
+  return includesTunnelError(normalizedMessage)
+    ? TUNNEL_CONNECTION_ERROR_MESSAGE
+    : normalizedMessage
+}
+
+const extractPayloadMessage = (payload: unknown) => {
+  if (typeof payload === 'string') {
+    return normalizeApiMessage(payload)
+  }
+
+  if (!payload || typeof payload !== 'object') {
+    return null
+  }
+
+  const maybeMessage =
+    'error' in payload
+      ? payload.error
+      : 'message' in payload
+        ? payload.message
+        : 'warning' in payload
+          ? payload.warning
+          : null
+
+  return typeof maybeMessage === 'string'
+    ? normalizeApiMessage(maybeMessage)
+    : null
 }
 
 const shouldRetryApiError = (error: unknown) => {
@@ -114,7 +159,7 @@ export const getApiErrorMessage = (
       error.code === 'ECONNABORTED' ||
       error.message?.toLowerCase().includes('timeout')
     ) {
-      return 'Система отвечает слишком долго. Попробуйте ещё раз через несколько секунд.'
+      return REQUEST_TIMEOUT_ERROR_MESSAGE
     }
 
     const statusCode = error.response?.status
@@ -124,50 +169,24 @@ export const getApiErrorMessage = (
       (typeof error.message === 'string' &&
         includesTunnelError(error.message))
     ) {
-      return 'Соединение с мини-приложением временно прервалось. Попробуйте ещё раз через несколько секунд.'
+      return TUNNEL_CONNECTION_ERROR_MESSAGE
     }
 
     if (
       typeof statusCode === 'number' &&
       TRANSIENT_API_STATUS_CODES.has(statusCode)
     ) {
-      return 'Сервис временно недоступен. Попробуйте ещё раз через несколько секунд.'
+      return TRANSIENT_API_ERROR_MESSAGE
     }
 
-    const payload = error.response?.data
-
-    if (typeof payload === 'string' && payload.trim()) {
-      if (includesTunnelError(payload)) {
-        return 'Соединение с мини-приложением временно прервалось. Попробуйте ещё раз через несколько секунд.'
-      }
-
-      return payload.trim()
+    const payloadMessage = extractPayloadMessage(error.response?.data)
+    if (payloadMessage) {
+      return payloadMessage
     }
 
-    if (payload && typeof payload === 'object') {
-      const maybeMessage =
-        'error' in payload
-          ? payload.error
-          : 'message' in payload
-            ? payload.message
-            : 'warning' in payload
-              ? payload.warning
-              : null
-
-      if (
-        typeof maybeMessage === 'string' &&
-        maybeMessage.trim()
-      ) {
-        if (includesTunnelError(maybeMessage)) {
-          return 'Соединение с мини-приложением временно прервалось. Попробуйте ещё раз через несколько секунд.'
-        }
-
-        return maybeMessage.trim()
-      }
-    }
-
-    if (typeof error.message === 'string' && error.message.trim()) {
-      return error.message.trim()
+    const errorMessage = normalizeApiMessage(error.message ?? null)
+    if (errorMessage) {
+      return errorMessage
     }
   }
 

@@ -68,6 +68,7 @@ Frontend должен продолжать работать только с эт
 В dev-режиме:
 
 - `vite` поднимает frontend;
+- Vite читает общий корневой `.env`;
 - Vite проксирует `/api` на `http://localhost:8787`;
 - `backend.server` обслуживает backend-запросы;
 - `backend.telegram_bot` отдаёт ссылку на публичный HTTPS URL Mini App.
@@ -78,6 +79,7 @@ Frontend должен продолжать работать только с эт
 
 ```bash
 copy .env.example .env
+cd frontend
 npm install
 ```
 
