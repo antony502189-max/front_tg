@@ -682,6 +682,7 @@ button {
   font-weight: 700;
 }
 
+.study-rating-section,
 .study-subjects-section {
   margin-top: 4px;
 }
@@ -692,17 +693,66 @@ button {
   font-weight: 600;
 }
 
+.study-rating-list,
 .study-subject-list {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
+.study-rating-card,
 .study-subject-card {
   padding: 14px 14px 10px;
   border-radius: 16px;
   background-color: var(--tg-secondary-bg-color);
   box-shadow: 0 10px 26px rgba(15, 23, 42, 0.16);
+}
+
+.study-rating-card {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 14px;
+}
+
+.study-rating-place {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  background-color: color-mix(
+    in srgb,
+    var(--tg-button-color) 16%,
+    var(--tg-bg-color)
+  );
+  color: var(--tg-text-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.study-rating-content {
+  min-width: 0;
+}
+
+.study-rating-title {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.study-rating-meta {
+  margin: 0;
+  font-size: 13px;
+  color: var(--tg-hint-color);
+}
+
+.study-rating-score {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--tg-text-color);
 }
 
 .study-subject-header {

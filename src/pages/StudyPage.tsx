@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { fetchGrades, type GradesResponse } from '../api/grades'
 import { getApiErrorMessage } from '../api/client'
 import { useUserStore } from '../store/userStore'
@@ -7,6 +7,34 @@ type GradesState = {
   requestKey: string | null
   data: GradesResponse | null
   error: string | null
+}
+
+type SubjectRating = {
+  id: string
+  subject: string
+  teacher: string | undefined
+  average: number
+  marksCount: number
+}
+
+const formatMarksLabel = (count: number) => {
+  const remainder100 = count % 100
+
+  if (remainder100 >= 11 && remainder100 <= 14) {
+    return 'оценок'
+  }
+
+  const remainder10 = count % 10
+
+  if (remainder10 === 1) {
+    return 'оценка'
+  }
+
+  if (remainder10 >= 2 && remainder10 <= 4) {
+    return 'оценки'
+  }
+
+  return 'оценок'
 }
 
 export const StudyPage = () => {
@@ -80,6 +108,45 @@ export const StudyPage = () => {
   const subjects = data?.subjects ?? []
   const warning = data?.warning
   const hasSubjects = subjects.length > 0
+  const subjectRating = useMemo<SubjectRating[]>(
+    () =>
+      subjects
+        .map((subject) => {
+          const validMarks = subject.marks
+            .map((mark) => mark.value)
+            .filter((value) => Number.isFinite(value))
+
+          if (!validMarks.length) {
+            return null
+          }
+
+          const total = validMarks.reduce(
+            (sum, value) => sum + value,
+            0,
+          )
+
+          return {
+            id: subject.id,
+            subject: subject.subject,
+            teacher: subject.teacher,
+            average: total / validMarks.length,
+            marksCount: validMarks.length,
+          }
+        })
+        .filter((item): item is SubjectRating => item !== null)
+        .sort((left, right) => {
+          if (right.average !== left.average) {
+            return right.average - left.average
+          }
+
+          if (right.marksCount !== left.marksCount) {
+            return right.marksCount - left.marksCount
+          }
+
+          return left.subject.localeCompare(right.subject, 'ru')
+        }),
+    [subjects],
+  )
 
   const handleRetry = () => {
     setReloadToken((token) => token + 1)
@@ -157,6 +224,41 @@ export const StudyPage = () => {
                       {summary.position ?? '—'}
                     </span>
                   </div>
+                </div>
+              </section>
+            )}
+
+            {subjectRating.length > 0 && (
+              <section className="study-rating-section">
+                <h2 className="study-section-title">
+                  Рейтинг по оценкам
+                </h2>
+                <div className="study-rating-list">
+                  {subjectRating.map((subject, index) => (
+                    <article
+                      key={`rating-${subject.id}`}
+                      className="study-rating-card"
+                    >
+                      <div className="study-rating-place">
+                        {index + 1}
+                      </div>
+                      <div className="study-rating-content">
+                        <h3 className="study-rating-title">
+                          {subject.subject}
+                        </h3>
+                        <p className="study-rating-meta">
+                          {subject.teacher
+                            ? `${subject.teacher} · `
+                            : ''}
+                          {subject.marksCount}{' '}
+                          {formatMarksLabel(subject.marksCount)}
+                        </p>
+                      </div>
+                      <div className="study-rating-score">
+                        {subject.average.toFixed(1)}
+                      </div>
+                    </article>
+                  ))}
                 </div>
               </section>
             )}
