@@ -1,6 +1,6 @@
 import { Component, StrictMode, type ErrorInfo, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { BrowserRouter } from 'react-router-dom'
+import { HashRouter } from 'react-router-dom'
 import './index.css'
 import App from './App.tsx'
 import { TelegramProvider } from './telegram/TelegramProvider'
@@ -63,9 +63,9 @@ try {
     <StrictMode>
       <RootErrorBoundary>
         <TelegramProvider>
-          <BrowserRouter>
+          <HashRouter>
             <App />
-          </BrowserRouter>
+          </HashRouter>
         </TelegramProvider>
       </RootErrorBoundary>
     </StrictMode>,

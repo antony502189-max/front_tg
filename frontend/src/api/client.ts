@@ -1,6 +1,5 @@
 import axios, { type InternalAxiosRequestConfig } from 'axios'
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? '/api'
 export const DEFAULT_API_TIMEOUT_MS = 10000
 export const LONG_API_TIMEOUT_MS = 30000
 const MAX_API_RETRIES = 2
@@ -25,6 +24,33 @@ const TUNNEL_ERROR_PATTERNS = [
   'origin has been unregistered',
   'trycloudflare',
 ]
+const RENDER_BACKEND_API_URL = 'https://front-tg-backend.onrender.com/api'
+
+const getApiBaseUrl = () => {
+  const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim()
+
+  if (configuredBaseUrl) {
+    return configuredBaseUrl
+  }
+
+  if (typeof window === 'undefined') {
+    return '/api'
+  }
+
+  const hostname = window.location.hostname.toLowerCase()
+
+  if (hostname === 'localhost' || hostname === '127.0.0.1') {
+    return '/api'
+  }
+
+  if (hostname.endsWith('.onrender.com')) {
+    return RENDER_BACKEND_API_URL
+  }
+
+  return '/api'
+}
+
+const apiBaseUrl = getApiBaseUrl()
 
 type RetriableRequestConfig = InternalAxiosRequestConfig & {
   retryCount?: number

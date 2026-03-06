@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: front-tg-frontend
+    name: front-tg
     runtime: static
     rootDir: frontend
     buildCommand: npm install && npm run build
