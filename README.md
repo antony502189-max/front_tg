@@ -2,6 +2,16 @@
 
 Это проект Telegram Mini App на React + Vite с backend на Python и простой Python-обёрткой для Telegram-бота.
 
+Внутреннее имя проекта — `BSUIR Nexus`: это mobile-first помощник студента с планером, учебной статистикой, расписанием, университетским поиском и настройками профиля.
+
+## Самое важное
+
+- вкладки приложения: `Планер`, `Учёба`, `Расписание`, `Универ`, `Настройки`;
+- стек: `React 19`, `TypeScript`, `Vite`, `React Router`, `Zustand`, `Axios`, `Framer Motion`, `Lucide React`, `@twa-dev/sdk`;
+- Telegram-интеграция: приложение инициализируется через `WebApp.ready()` и подстраивает тему из `WebApp.themeParams`;
+- пользовательские данные (`groupNumber`, `studentCardNumber`, `subgroup`) сохраняются в `localStorage` через Zustand-store;
+- frontend работает через локальный Python backend, а не ходит в IIS API напрямую.
+
 Фронтенд отвечает за интерфейс, а backend берет на себя работу с IIS БГУИР:
 - ходит в `https://iis.bsuir.by/api/v1`;
 - кэширует ответы;
