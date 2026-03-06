@@ -111,6 +111,7 @@ npm run test:backend
 
 ### Backend
 
+- `HOST`
 - `PORT`
 - `IIS_BASE_URL`
 - `CACHE_TTL_MS`

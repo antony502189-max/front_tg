@@ -21,6 +21,7 @@ from backend.server import (
 
 
 TEST_CONFIG = {
+    "host": "127.0.0.1",
     "port": 8787,
     "iis_base_url": "https://iis.bsuir.by/api/v1",
     "cache_ttl_ms": 60_000,

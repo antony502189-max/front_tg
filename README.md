@@ -109,6 +109,16 @@ npm run dev:bot
 npm run test:backend
 ```
 
+## Render
+
+Для деплоя backend на Render в репозитории теперь есть:
+
+- `render.yaml` — Blueprint для Render Web Service;
+- `requirements.txt` — файл Python-зависимостей;
+- `.python-version` — фиксирует ветку Python `3.13`.
+
+Render по документации ожидает, что web service слушает `0.0.0.0` и использует `PORT`. В проекте это уже учтено: локально backend по умолчанию остаётся на `127.0.0.1`, а в `render.yaml` для Render выставляется `HOST=0.0.0.0`.
+
 ## Переменные окружения
 
 Смотри `.env.example`. Основные настройки:

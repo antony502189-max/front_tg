@@ -31,6 +31,7 @@ TodayFn = Callable[[], date]
 
 @dataclass(frozen=True)
 class AppConfig:
+    host: str
     port: int
     iis_base_url: str
     cache_ttl_ms: int
@@ -42,6 +43,7 @@ class AppConfig:
     @classmethod
     def from_mapping(cls, values: Mapping[str, Any]) -> "AppConfig":
         return cls(
+            host=str(values["host"]),
             port=int(values["port"]),
             iis_base_url=str(values["iis_base_url"]),
             cache_ttl_ms=int(values["cache_ttl_ms"]),
@@ -80,6 +82,7 @@ def parse_number_env(name: str, fallback: int) -> int:
 
 def load_config() -> AppConfig:
     return AppConfig(
+        host=os.getenv("HOST", "127.0.0.1"),
         port=parse_number_env("PORT", 8787),
         iis_base_url=os.getenv("IIS_BASE_URL", "https://iis.bsuir.by/api/v1"),
         cache_ttl_ms=parse_number_env("CACHE_TTL_MS", 60_000),
@@ -101,6 +104,7 @@ def coerce_config(config: AppConfig | Mapping[str, Any] | None) -> AppConfig:
         return config
 
     merged_config = {
+        "host": CONFIG.host,
         "port": CONFIG.port,
         "iis_base_url": CONFIG.iis_base_url,
         "cache_ttl_ms": CONFIG.cache_ttl_ms,
@@ -1271,11 +1275,13 @@ def create_handler(app: BackendApp) -> type[BaseHTTPRequestHandler]:
 def run_server() -> None:
     app = BackendApp()
     server = ThreadingHTTPServer(
-        ("127.0.0.1", app.config.port),
+        (app.config.host, app.config.port),
         create_handler(app),
     )
 
-    print(f"[backend:python] listening on http://127.0.0.1:{app.config.port}")
+    print(
+        f"[backend:python] listening on http://{app.config.host}:{app.config.port}"
+    )
 
     try:
         server.serve_forever()
