@@ -13,6 +13,14 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import Request, urlopen
 
+try:
+    from backend.env import load_project_env
+except ModuleNotFoundError:  # pragma: no cover - fallback for direct script launch
+    from env import load_project_env  # type: ignore
+
+
+load_project_env()
+
 
 JsonValue = Any
 Fetcher = Callable[[str, dict[str, str]], JsonValue]
@@ -129,6 +137,12 @@ ROUTE_CONFIGS = {
         cache_namespace="/employees",
         query_param="q",
         min_length=2,
+    ),
+    "/api/auditories": RouteConfig(
+        kind="auditories",
+        cache_namespace="/auditories",
+        query_param="q",
+        min_length=1,
     ),
 }
 
@@ -301,6 +315,12 @@ def first_non_empty_string(*values: Any) -> str | None:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return None
+
+
+def normalize_lookup_value(value: Any) -> str:
+    if value is None:
+        return ""
+    return "".join(str(value).split()).lower()
 
 
 def first_finite_number(*values: Any) -> float | None:
@@ -520,10 +540,92 @@ def normalize_employees_response(
     return result
 
 
+def normalize_auditories_response(payload: Any, query: str) -> list[dict[str, Any]]:
+    items = payload
+    if isinstance(payload, dict):
+        items = payload.get("value", [])
+
+    if not isinstance(items, list):
+        return []
+
+    normalized_query = normalize_lookup_value(query)
+    result = []
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+
+        building = item.get("buildingNumber")
+        building_name = first_non_empty_string(
+            building.get("name") if isinstance(building, dict) else building
+        )
+        auditory_type = item.get("auditoryType")
+        type_name = first_non_empty_string(
+            auditory_type.get("name") if isinstance(auditory_type, dict) else auditory_type
+        )
+        type_abbrev = first_non_empty_string(
+            auditory_type.get("abbrev") if isinstance(auditory_type, dict) else None
+        )
+        department = item.get("department")
+        department_name = first_non_empty_string(
+            department.get("nameAndAbbrev") if isinstance(department, dict) else department,
+            department.get("name") if isinstance(department, dict) else None,
+            department.get("abbrev") if isinstance(department, dict) else None,
+        )
+        name = first_non_empty_string(item.get("name"))
+
+        if name is None:
+            continue
+
+        full_name = " ".join(part for part in (name, building_name) if part)
+        search_blob = normalize_lookup_value(
+            " ".join(
+                value
+                for value in (
+                    name,
+                    full_name,
+                    building_name,
+                    type_name,
+                    type_abbrev,
+                    department_name,
+                    first_non_empty_string(item.get("note")),
+                )
+                if value
+            )
+        )
+
+        if normalized_query and normalized_query not in search_blob:
+            continue
+
+        result.append(
+            {
+                "id": str(item.get("id", full_name)),
+                "name": name,
+                "building": building_name,
+                "fullName": full_name,
+                "type": type_name,
+                "typeAbbrev": type_abbrev,
+                "capacity": item.get("capacity"),
+                "department": department_name,
+                "note": first_non_empty_string(item.get("note")),
+            }
+        )
+
+    result.sort(
+        key=lambda item: (
+            not normalize_lookup_value(item["fullName"]).startswith(normalized_query),
+            item["fullName"],
+        )
+    )
+    return result[:50]
+
+
 def find_student_card_match(
     payload: Any,
     student_card_number: str,
 ) -> dict[str, Any] | None:
+    normalized_student_card_number = normalize_lookup_value(student_card_number)
+
     if isinstance(payload, dict):
         wrapped = payload.get("value")
         if isinstance(wrapped, list):
@@ -537,7 +639,10 @@ def find_student_card_match(
     for item in payload:
         if not isinstance(item, dict):
             continue
-        if str(item.get("studentCardNumber", "")).strip() == student_card_number:
+        if (
+            normalize_lookup_value(item.get("studentCardNumber", ""))
+            == normalized_student_card_number
+        ):
             return item
 
     for item in payload:
@@ -553,6 +658,12 @@ def normalize_mark(raw_mark: Any) -> dict[str, Any] | None:
 
     if isinstance(raw_mark, (int, float)) and math.isfinite(raw_mark):
         return {"value": float(raw_mark)}
+
+    if isinstance(raw_mark, str):
+        try:
+            return {"value": float(raw_mark.replace(",", "."))}
+        except ValueError:
+            return None
 
     if not isinstance(raw_mark, dict):
         return None
@@ -582,13 +693,40 @@ def normalize_mark(raw_mark: Any) -> dict[str, Any] | None:
     return mark
 
 
+def unwrap_grade_payload(payload: Any) -> Any:
+    current = payload
+
+    for _ in range(4):
+        if not isinstance(current, dict):
+            return current
+
+        nested = (
+            current.get("studentRating")
+            or current.get("rating")
+            or current.get("data")
+            or current.get("result")
+            or current.get("value")
+        )
+
+        if isinstance(nested, dict):
+            current = nested
+            continue
+
+        return current
+
+    return current
+
+
 def extract_grade_subjects(payload: Any) -> list[dict[str, Any]]:
-    candidates = payload
-    if isinstance(payload, dict):
+    candidates = unwrap_grade_payload(payload)
+    if isinstance(candidates, dict):
         candidates = (
-            payload.get("subjects")
-            or payload.get("disciplines")
-            or payload.get("items")
+            candidates.get("subjects")
+            or candidates.get("disciplines")
+            or candidates.get("items")
+            or candidates.get("results")
+            or candidates.get("ratingItems")
+            or candidates.get("value")
             or []
         )
 
@@ -652,6 +790,8 @@ def extract_grade_subjects(payload: Any) -> list[dict[str, Any]]:
 
 
 def extract_grade_summary(payload: Any) -> dict[str, Any] | None:
+    payload = unwrap_grade_payload(payload)
+
     if not isinstance(payload, dict):
         return None
 
@@ -690,6 +830,7 @@ def normalize_grades_response(
     student_card_number: str,
     search_payload: Any,
     rating_payload: Any,
+    warning: str | None = None,
 ) -> dict[str, Any]:
     matched_student = find_student_card_match(search_payload, student_card_number)
     summary = extract_grade_summary(matched_student) or extract_grade_summary(
@@ -697,10 +838,15 @@ def normalize_grades_response(
     )
     subjects = extract_grade_subjects(rating_payload)
 
-    return {
+    response = {
         "summary": summary,
         "subjects": subjects,
     }
+
+    if warning is not None:
+        response["warning"] = warning
+
+    return response
 
 
 class BackendApp:
@@ -762,10 +908,15 @@ class BackendApp:
         )
         return normalize_employees_response(employees_payload, self.config)
 
+    def _build_auditories_payload(self, query_value: str) -> JsonValue:
+        auditories_payload = self.request_upstream("/auditories", {})
+        return normalize_auditories_response(auditories_payload, query_value)
+
     def _build_grades_payload(self, query_value: str) -> JsonValue:
         search_payload = None
         rating_payload = None
-        last_error: UpstreamRequestError | None = None
+        search_error: UpstreamRequestError | None = None
+        rating_error: UpstreamRequestError | None = None
 
         try:
             search_payload = self.request_upstream(
@@ -773,7 +924,7 @@ class BackendApp:
                 {"studentCardNumber": query_value},
             )
         except UpstreamRequestError as error:
-            last_error = error
+            search_error = error
 
         try:
             rating_payload = self.request_upstream(
@@ -781,15 +932,29 @@ class BackendApp:
                 {"studentCardNumber": query_value},
             )
         except UpstreamRequestError as error:
-            last_error = error
+            rating_error = error
 
-        if search_payload is None and rating_payload is None and last_error is not None:
-            raise last_error
+        if search_payload is None and rating_payload is None:
+            if search_error is not None and search_error.status == 404:
+                raise search_error
+            if rating_error is not None:
+                raise rating_error
+            if search_error is not None:
+                raise search_error
+
+        warning = None
+        if rating_payload is None:
+            warning = (
+                search_error.message
+                if search_error is not None and search_error.status == 404
+                else rating_error.message if rating_error is not None else None
+            )
 
         return normalize_grades_response(
             query_value,
             search_payload,
             rating_payload,
+            warning=warning,
         )
 
     def build_route_payload(self, route: RouteConfig, query_value: str) -> JsonValue:
@@ -798,6 +963,9 @@ class BackendApp:
 
         if route.kind == "employees":
             return self._build_employees_payload(query_value)
+
+        if route.kind == "auditories":
+            return self._build_auditories_payload(query_value)
 
         if route.kind == "grades":
             return self._build_grades_payload(query_value)
@@ -824,7 +992,7 @@ class BackendApp:
         if method == "OPTIONS":
             return Response(204)
 
-        if method != "GET":
+        if method not in {"GET", "HEAD"}:
             return Response(405, {"error": "Method not allowed"})
 
         parsed_url = urlparse(raw_path)

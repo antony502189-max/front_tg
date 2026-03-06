@@ -1,6 +1,6 @@
 # Telegram Mini App для БГУИР
 
-Это проект Telegram Mini App на React + Vite с backend на Python.
+Это проект Telegram Mini App на React + Vite с backend на Python и простой Python-обёрткой для Telegram-бота.
 
 Фронтенд отвечает за интерфейс, а backend берет на себя работу с IIS БГУИР:
 - ходит в `https://iis.bsuir.by/api/v1`;
@@ -14,17 +14,20 @@
 
 Схема такая:
 
-`Telegram Mini App -> Python backend -> IIS BSUIR API`
+`Telegram Bot -> Mini App frontend -> Python backend -> IIS BSUIR API`
 
-Backend поднимается локально на `http://localhost:8787`, а Vite в dev-режиме проксирует туда запросы с `/api`.
+Backend поднимается локально на `http://localhost:8787`, Vite в dev-режиме проксирует туда запросы с `/api`, а обёртка бота умеет отдавать кнопку для открытия Mini App.
 
 ## Структура проекта
 
 ```text
 .
 |-- backend
+|   |-- env.py
 |   |-- server.py
 |   |-- server_test.py
+|   |-- telegram_bot.py
+|   |-- telegram_bot_test.py
 |   `-- __init__.py
 |-- public
 |-- src
@@ -33,9 +36,10 @@ Backend поднимается локально на `http://localhost:8787`, а
 |   |-- components
 |   |-- hooks
 |   |-- layouts
-|   |-- mocks
 |   |-- pages
 |   |-- store
+|   |-- types
+|   |-- utils
 |   `-- telegram
 |-- .env.example
 |-- index.html
@@ -48,7 +52,7 @@ Backend поднимается локально на `http://localhost:8787`, а
 
 Что где лежит:
 - `src/` — весь frontend.
-- `backend/` — весь backend на Python.
+- `backend/` — Python backend, загрузка `.env` и Telegram-обёртка.
 - корневые конфиги остаются в корне, потому что их так ожидают Vite, TypeScript и npm.
 
 ## Backend API
@@ -58,6 +62,13 @@ Backend поднимается локально на `http://localhost:8787`, а
 - `GET /api/schedule?studentGroup=...`
 - `GET /api/grades?studentCardNumber=...`
 - `GET /api/employees?q=...`
+
+Telegram-обёртка:
+- работает через long polling;
+- автоматически снимает webhook перед запуском polling;
+- отвечает на `/start`, `/app`, `/help`;
+- отправляет кнопку `web_app` для открытия Mini App;
+- может выставить menu button у бота автоматически.
 
 Что он делает внутри:
 - валидирует параметры;
@@ -73,9 +84,16 @@ Backend поднимается локально на `http://localhost:8787`, а
 ## Быстрый старт
 
 ```bash
+copy .env.example .env
 npm install
 npm run dev:backend
 npm run dev
+```
+
+Если нужен запуск обёртки бота:
+
+```bash
+npm run dev:bot
 ```
 
 Проверка backend:
@@ -95,7 +113,18 @@ npm run test:backend
 - `REQUEST_TIMEOUT_MS`
 - `MAX_RETRIES`
 - `RETRY_DELAY_MS`
+- `BOT_TOKEN`
+- `MINI_APP_URL`
+- `TELEGRAM_API_BASE_URL`
+- `TELEGRAM_POLLING_TIMEOUT_S`
+- `TELEGRAM_RETRY_DELAY_MS`
+- `TELEGRAM_DROP_PENDING_UPDATES`
+- `TELEGRAM_SET_CHAT_MENU_BUTTON`
 
 ## Коротко по сути
 
-Сейчас backend в проекте один и он полностью на Python. Node-вариант из репозитория убран.
+Сейчас backend в проекте один и он полностью на Python. Node-вариант из репозитория убран, а Telegram-обёртка тоже живёт рядом в Python.
+
+Важно для Telegram:
+- для реального запуска Mini App внутри Telegram нужен публичный HTTPS URL в `MINI_APP_URL`;
+- локальный `http://localhost:5173` подходит только для браузерной разработки, но не для нормального открытия Mini App у пользователей.

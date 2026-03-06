@@ -6,7 +6,9 @@ from backend.server import (
     CacheEntry,
     UpstreamRequestError,
     cache_key,
+    normalize_auditories_response,
     normalize_employees_response,
+    extract_grade_subjects,
     normalize_grades_response,
     normalize_schedule_response,
     read_fresh_cache,
@@ -32,6 +34,7 @@ class BackendServerTests(unittest.TestCase):
         self.assertEqual(route_config("/api/schedule").cache_namespace, "/schedule")
         self.assertEqual(route_config("/api/grades").query_param, "studentCardNumber")
         self.assertEqual(route_config("/api/employees").min_length, 2)
+        self.assertEqual(route_config("/api/auditories").query_param, "q")
         self.assertIsNone(route_config("/unknown"))
 
     def test_returns_400_when_required_query_is_missing(self) -> None:
@@ -41,6 +44,14 @@ class BackendServerTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("studentGroup", response.payload["error"])
+
+    def test_head_request_is_served_for_known_routes(self) -> None:
+        app = BackendApp(config=TEST_CONFIG, fetcher=lambda *_: {"days": []})
+
+        response = app.handle_request("HEAD", "/api/schedule?studentGroup=353502")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.payload, {"days": []})
 
     def test_serves_fresh_cache_without_calling_upstream(self) -> None:
         fetch_count = {"value": 0}
@@ -255,6 +266,61 @@ class BackendServerTests(unittest.TestCase):
             ],
         )
 
+    def test_normalize_auditories_response_filters_and_maps_fields(self) -> None:
+        payload = [
+            {
+                "id": 214,
+                "name": "303",
+                "capacity": 24,
+                "note": "После ремонта",
+                "auditoryType": {"name": "лабораторные занятия", "abbrev": "лб"},
+                "buildingNumber": {"name": "3 к."},
+                "department": {"nameAndAbbrev": "Каф.ИИС"},
+            },
+            {
+                "id": 999,
+                "name": "999",
+                "auditoryType": {"name": "лекции", "abbrev": "лк"},
+                "buildingNumber": {"name": "9 к."},
+            },
+        ]
+
+        normalized = normalize_auditories_response(payload, "303")
+
+        self.assertEqual(len(normalized), 1)
+        self.assertEqual(normalized[0]["fullName"], "303 3 к.")
+        self.assertEqual(normalized[0]["typeAbbrev"], "лб")
+        self.assertEqual(normalized[0]["department"], "Каф.ИИС")
+        self.assertEqual(normalized[0]["capacity"], 24)
+
+    def test_auditories_route_returns_filtered_list(self) -> None:
+        def fetcher(path: str, _params: dict[str, str]):
+            if path == "/auditories":
+                return [
+                    {
+                        "id": 214,
+                        "name": "303",
+                        "auditoryType": {"name": "лабораторные занятия", "abbrev": "лб"},
+                        "buildingNumber": {"name": "3 к."},
+                    },
+                    {
+                        "id": 215,
+                        "name": "101",
+                        "auditoryType": {"name": "лекции", "abbrev": "лк"},
+                        "buildingNumber": {"name": "1 к."},
+                    },
+                ]
+
+            raise AssertionError(f"Unexpected path: {path}")
+
+        app = BackendApp(config=TEST_CONFIG, fetcher=fetcher)
+
+        response = app.handle_request("GET", "/api/auditories?q=303")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.payload), 1)
+        self.assertEqual(response.payload[0]["name"], "303")
+
     def test_normalize_grades_response_combines_summary_and_subjects(self) -> None:
         search_payload = {
             "studentCardNumber": "123456",
@@ -284,6 +350,25 @@ class BackendServerTests(unittest.TestCase):
         self.assertEqual(normalized["subjects"][0]["subject"], "Math")
         self.assertEqual(len(normalized["subjects"][0]["marks"]), 2)
 
+    def test_extract_grade_subjects_handles_wrapped_list_payload(self) -> None:
+        payload = {
+            "value": [
+                {
+                    "id": "math",
+                    "disciplineName": "Математика",
+                    "teacher": "Иванов И.И.",
+                    "values": ["9", 8],
+                }
+            ]
+        }
+
+        subjects = extract_grade_subjects(payload)
+
+        self.assertEqual(len(subjects), 1)
+        self.assertEqual(subjects[0]["subject"], "Математика")
+        self.assertEqual(subjects[0]["teacher"], "Иванов И.И.")
+        self.assertEqual(subjects[0]["marks"], [{"value": 9.0}, {"value": 8.0}])
+
     def test_grades_route_handles_partial_upstream_failure(self) -> None:
         def fetcher(path: str, _params: dict[str, str]):
             if path == "/rating/studentSearch":
@@ -311,6 +396,29 @@ class BackendServerTests(unittest.TestCase):
         self.assertEqual(response.payload["subjects"][0]["subject"], "Математика")
         self.assertEqual(response.payload["subjects"][0]["teacher"], "Иванов И.И.")
         self.assertEqual(len(response.payload["subjects"][0]["marks"]), 2)
+
+    def test_grades_route_prefers_not_found_message_for_unknown_student_card(self) -> None:
+        def fetcher(path: str, _params: dict[str, str]):
+            if path == "/rating/studentSearch":
+                raise UpstreamRequestError(
+                    "По данному студенческому билету ничего не найдено",
+                    status=404,
+                )
+
+            if path == "/rating/studentRating":
+                raise UpstreamRequestError("Internal Server Error", status=500)
+
+            raise AssertionError(f"Unexpected path: {path}")
+
+        app = BackendApp(config=TEST_CONFIG, fetcher=fetcher)
+
+        response = app.handle_request("GET", "/api/grades?studentCardNumber=123")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(
+            response.payload["error"],
+            "По данному студенческому билету ничего не найдено",
+        )
 
 
 if __name__ == "__main__":

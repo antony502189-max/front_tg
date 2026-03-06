@@ -1,4 +1,4 @@
-import { ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import {
   useLocation,
   useNavigate,
@@ -10,6 +10,7 @@ import {
   Building2,
   CalendarDays,
   LayoutGrid,
+  Settings2,
 } from 'lucide-react'
 
 type TabConfig = {
@@ -43,6 +44,12 @@ const TABS: TabConfig[] = [
     label: 'Универ',
     path: '/app/univer',
     icon: <Building2 size={20} />,
+  },
+  {
+    id: 'settings',
+    label: 'Настройки',
+    path: '/app/settings',
+    icon: <Settings2 size={20} />,
   },
 ]
 

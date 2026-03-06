@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion'
-import { useState, FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useTasksStore, type TaskPriority } from '../../store/tasksStore'
 

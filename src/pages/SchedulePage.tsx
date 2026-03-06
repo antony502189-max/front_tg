@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { WeekSchedule } from '../api/schedule'
 import { fetchStudentSchedule } from '../api/schedule'
 import { CalendarStrip } from '../components/schedule/CalendarStrip'
 import { LessonCard } from '../components/schedule/LessonCard'
@@ -53,6 +52,7 @@ export const SchedulePage = () => {
 
   const isLoading = useScheduleStore((state) => state.isLoading)
   const error = useScheduleStore((state) => state.error)
+  const calendarDays = useScheduleStore((state) => state.days)
   const setLoading = useScheduleStore((state) => state.setLoading)
   const setError = useScheduleStore((state) => state.setError)
   const setSchedule = useScheduleStore((state) => state.setSchedule)
@@ -61,7 +61,6 @@ export const SchedulePage = () => {
   const [selectedDate, setSelectedDate] = useState<string>(() =>
     toDateKey(new Date()),
   )
-  const [week, setWeek] = useState<WeekSchedule | null>(null)
   const [reloadToken, setReloadToken] = useState(0)
 
   const lessonsForSelectedDate = useScheduleStore((state) =>
@@ -70,7 +69,6 @@ export const SchedulePage = () => {
 
   useEffect(() => {
     if (!normalizedGroupNumber) {
-      setWeek(null)
       clearSchedule()
       setLoading(false)
       setError(
@@ -88,7 +86,6 @@ export const SchedulePage = () => {
       .then((data) => {
         if (isCancelled) return
 
-        setWeek(data)
         setSchedule(data.days)
         setSelectedDate((currentSelectedDate) => {
           if (
@@ -106,7 +103,6 @@ export const SchedulePage = () => {
       .catch(() => {
         if (isCancelled) return
 
-        setWeek(null)
         clearSchedule()
         setError('Не удалось загрузить расписание.')
         setLoading(false)
@@ -144,8 +140,10 @@ export const SchedulePage = () => {
     setSelectedDate(date)
   }
 
-  const hasLessons = lessonsForSelectedDate.length > 0
-  const calendarDays = week?.days ?? []
+  const visibleLessons = normalizedGroupNumber
+    ? lessonsForSelectedDate
+    : []
+  const hasLessons = visibleLessons.length > 0
 
   return (
     <div className="planner-page">
@@ -200,7 +198,7 @@ export const SchedulePage = () => {
 
             {hasLessons ? (
               <div className="schedule-lessons-list">
-                {lessonsForSelectedDate.map((lesson) => (
+                {visibleLessons.map((lesson) => (
                   <LessonCard
                     key={lesson.id}
                     lesson={lesson}

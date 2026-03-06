@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { fetchGrades, type GradesResponse } from '../api/grades'
+import { getApiErrorMessage } from '../api/client'
 import { useUserStore } from '../store/userStore'
 
 type GradesState = {
+  requestKey: string | null
   data: GradesResponse | null
-  isLoading: boolean
   error: string | null
 }
 
@@ -16,62 +17,68 @@ export const StudyPage = () => {
 
   const [reloadToken, setReloadToken] = useState(0)
   const [state, setState] = useState<GradesState>({
+    requestKey: null,
     data: null,
-    isLoading: false,
     error: null,
   })
+  const hasStudentCardNumber = normalizedStudentCardNumber.length > 0
+  const requestKey = hasStudentCardNumber
+    ? `${normalizedStudentCardNumber}:${reloadToken}`
+    : null
 
   useEffect(() => {
-    if (!normalizedStudentCardNumber) {
-      setState({
-        data: null,
-        isLoading: false,
-        error: null,
-      })
+    if (!requestKey) {
       return
     }
 
     let isCancelled = false
-
-    setState((prev) => ({
-      ...prev,
-      isLoading: true,
-      error: null,
-    }))
 
     void fetchGrades(normalizedStudentCardNumber)
       .then((data) => {
         if (isCancelled) return
 
         setState({
+          requestKey,
           data,
-          isLoading: false,
           error: null,
         })
       })
-      .catch(() => {
+      .catch((error) => {
         if (isCancelled) return
 
         setState({
+          requestKey,
           data: null,
-          isLoading: false,
-          error: 'Не удалось загрузить данные об успеваемости.',
+          error: getApiErrorMessage(
+            error,
+            'Не удалось загрузить данные об успеваемости.',
+          ),
         })
       })
 
     return () => {
       isCancelled = true
     }
-  }, [normalizedStudentCardNumber, reloadToken])
+  }, [normalizedStudentCardNumber, requestKey])
 
-  const { data, isLoading, error } = state
-  const displayError =
-    error ??
-    (!normalizedStudentCardNumber
-      ? 'Добавьте номер студенческого в настройках, чтобы видеть успеваемость.'
-      : null)
+  const hasResolvedCurrentRequest = state.requestKey === requestKey
+  const data =
+    hasStudentCardNumber && hasResolvedCurrentRequest
+      ? state.data
+      : null
+  const isLoading = hasStudentCardNumber && !hasResolvedCurrentRequest
+  const error =
+    hasStudentCardNumber && hasResolvedCurrentRequest
+      ? state.error
+      : null
+  const displayMessage = hasStudentCardNumber
+    ? error
+    : 'Добавьте номер студенческого в настройках, чтобы видеть успеваемость.'
+  const canRenderResults =
+    hasStudentCardNumber && hasResolvedCurrentRequest && !error
   const summary = data?.summary
   const subjects = data?.subjects ?? []
+  const warning = data?.warning
   const hasSubjects = subjects.length > 0
 
   const handleRetry = () => {
@@ -98,9 +105,9 @@ export const StudyPage = () => {
           </div>
         )}
 
-        {!isLoading && displayError && (
+        {!isLoading && displayMessage && (
           <div className="study-error-card">
-            <p className="study-error-text">{displayError}</p>
+            <p className="study-error-text">{displayMessage}</p>
             {normalizedStudentCardNumber && (
               <button
                 type="button"
@@ -113,8 +120,14 @@ export const StudyPage = () => {
           </div>
         )}
 
-        {!isLoading && !error && (
+        {!isLoading && canRenderResults && (
           <>
+            {warning && (
+              <div className="study-error-card">
+                <p className="study-error-text">{warning}</p>
+              </div>
+            )}
+
             {summary && (
               <section className="study-summary-card">
                 <div className="study-summary-header">
@@ -195,11 +208,12 @@ export const StudyPage = () => {
               ) : (
                 <div className="study-empty-card">
                   <h3 className="study-empty-title">
-                    Пока нет данных
+                    {warning ? 'Оценки недоступны' : 'Пока нет данных'}
                   </h3>
                   <p className="study-empty-subtitle">
-                    Как только в системе появятся оценки, вы
-                    увидите их здесь.
+                    {warning
+                      ? 'Проверьте номер студенческого в настройках или попробуйте позже.'
+                      : 'Как только в системе появятся оценки, вы увидите их здесь.'}
                   </p>
                 </div>
               )}

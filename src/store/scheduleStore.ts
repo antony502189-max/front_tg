@@ -14,19 +14,28 @@ export type Lesson = {
   date: string
 }
 
+export type ScheduleDay = {
+  date: string
+  lessons: Lesson[]
+}
+
+const EMPTY_LESSONS: Lesson[] = []
+
 type ScheduleState = {
+  days: ScheduleDay[]
   isLoading: boolean
   error: string | null
   lessonsByDate: Record<string, Lesson[]>
   setLoading: (isLoading: boolean) => void
   setError: (error: string | null) => void
-  setSchedule: (days: Array<{ date: string; lessons: Lesson[] }>) => void
+  setSchedule: (days: ScheduleDay[]) => void
   clearSchedule: () => void
   getLessonsForDate: (date: string) => Lesson[]
   getTodayLessons: () => Lesson[]
 }
 
 export const useScheduleStore = create<ScheduleState>((set, get) => ({
+  days: [],
   isLoading: false,
   error: null,
   lessonsByDate: {},
@@ -38,16 +47,17 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
   },
   setSchedule: (days) => {
     set({
+      days,
       lessonsByDate: Object.fromEntries(
         days.map((day) => [day.date, day.lessons]),
       ),
     })
   },
   clearSchedule: () => {
-    set({ lessonsByDate: {} })
+    set({ days: [], lessonsByDate: {} })
   },
   getLessonsForDate: (date) => {
-    return get().lessonsByDate[date] ?? []
+    return get().lessonsByDate[date] ?? EMPTY_LESSONS
   },
   getTodayLessons: () => {
     return get().getLessonsForDate(toDateKey(new Date()))

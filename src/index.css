@@ -553,7 +553,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  gap: 4px;
   padding: 8px 10px;
   border-radius: 16px;
   background-color: var(--tg-secondary-bg-color);
@@ -601,7 +601,9 @@ body {
 }
 
 .bottom-nav-label {
+  max-width: 100%;
   line-height: 1.1;
+  text-align: center;
 }
 
 a {
@@ -1037,6 +1039,38 @@ button {
   margin-bottom: 10px;
 }
 
+.univer-mode-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.univer-mode-tab {
+  flex: 1 1 0;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.7);
+  background-color: transparent;
+  color: var(--tg-hint-color);
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.univer-mode-tab--active {
+  border-color: var(--tg-button-color);
+  background-color: color-mix(
+    in srgb,
+    var(--tg-button-color) 16%,
+    transparent
+  );
+  color: var(--tg-text-color);
+}
+
 .univer-search-input-wrapper {
   display: flex;
   align-items: center;
@@ -1074,6 +1108,12 @@ button {
 }
 
 .univer-results-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.univer-room-list {
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -1147,6 +1187,113 @@ button {
   border-radius: 999px;
   border: 1px solid rgba(148, 163, 184, 0.7);
   font-size: 11px;
+}
+
+.univer-room-card {
+  padding: 14px 14px 12px;
+  border-radius: 16px;
+  background-color: var(--tg-secondary-bg-color);
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.16);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.univer-room-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.univer-room-title {
+  margin: 0 0 3px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.univer-room-subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: var(--tg-hint-color);
+}
+
+.univer-room-status {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+
+.univer-room-status--free {
+  color: rgba(22, 163, 74, 0.95);
+  border-color: rgba(34, 197, 94, 0.55);
+  background-color: rgba(22, 163, 74, 0.08);
+}
+
+.univer-room-status--busy {
+  color: rgba(185, 28, 28, 0.95);
+  border-color: rgba(239, 68, 68, 0.6);
+  background-color: rgba(239, 68, 68, 0.08);
+}
+
+.univer-room-status--idle {
+  color: var(--tg-hint-color);
+  border-color: rgba(148, 163, 184, 0.6);
+  background-color: rgba(148, 163, 184, 0.08);
+}
+
+.univer-room-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.univer-room-usage {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.univer-room-text {
+  margin: 0;
+  font-size: 13px;
+  color: var(--tg-hint-color);
+}
+
+.univer-room-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.univer-room-slot {
+  display: grid;
+  grid-template-columns: minmax(86px, auto) auto 1fr;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background-color: var(--tg-bg-color);
+  align-items: center;
+}
+
+.univer-room-slot-date {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.univer-room-slot-time {
+  font-size: 12px;
+  color: var(--tg-hint-color);
+  white-space: nowrap;
+}
+
+.univer-room-slot-subject {
+  font-size: 12px;
+  min-width: 0;
 }
 
 .univer-empty-card,

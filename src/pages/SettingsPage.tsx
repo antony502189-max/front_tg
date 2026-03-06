@@ -1,10 +1,11 @@
-import { FormEvent, useMemo, useState } from 'react'
+import { useMemo, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTelegramBackButton } from '../hooks/useTelegramBackButton'
 import { useUserStore, type Subgroup } from '../store/userStore'
 
 const GROUP_LENGTH = 6
-const CARD_LENGTH = 8
+const STUDENT_CARD_MIN_LENGTH = 4
+const STUDENT_CARD_MAX_LENGTH = 32
 
 export const SettingsPage = () => {
   const navigate = useNavigate()
@@ -38,7 +39,8 @@ export const SettingsPage = () => {
     [groupNumber],
   )
   const isCardValid = useMemo(
-    () => studentCardNumber.length === CARD_LENGTH,
+    () =>
+      studentCardNumber.trim().length >= STUDENT_CARD_MIN_LENGTH,
     [studentCardNumber],
   )
   const isFormValid = isGroupValid && isCardValid
@@ -49,8 +51,7 @@ export const SettingsPage = () => {
   }
 
   const handleCardChange = (value: string) => {
-    const numeric = value.replace(/\D/g, '').slice(0, CARD_LENGTH)
-    setStudentCardNumber(numeric)
+    setStudentCardNumber(value.slice(0, STUDENT_CARD_MAX_LENGTH))
   }
 
   const handleSubmit = (event: FormEvent) => {
@@ -141,14 +142,14 @@ export const SettingsPage = () => {
               </label>
               <input
                 id="settings-card"
-                inputMode="numeric"
+                inputMode="text"
                 autoComplete="off"
                 className={`onboarding-input${
                   touched.card && !isCardValid
                     ? ' onboarding-input--error'
                     : ''
                 }`}
-                placeholder="Например, 12345678"
+                placeholder="Как в IIS, например 12345678"
                 value={studentCardNumber}
                 onChange={(event) =>
                   handleCardChange(event.target.value)
@@ -159,12 +160,12 @@ export const SettingsPage = () => {
               />
               {touched.card && !isCardValid ? (
                 <p className="onboarding-error">
-                  Номер студенческого должен содержать ровно{' '}
-                  {CARD_LENGTH} цифр.
+                  Введите номер студенческого как минимум из{' '}
+                  {STUDENT_CARD_MIN_LENGTH} символов.
                 </p>
               ) : (
                 <p className="onboarding-hint">
-                  Только цифры, без пробелов и символов.
+                  Можно вводить так же, как номер записан в IIS.
                 </p>
               )}
             </div>

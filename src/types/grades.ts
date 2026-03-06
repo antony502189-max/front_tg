@@ -19,4 +19,5 @@ export type GradesSummary = {
 export type GradesResponse = {
   summary?: GradesSummary
   subjects: SubjectGrades[]
+  warning?: string
 }
