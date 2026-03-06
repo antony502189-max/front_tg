@@ -127,11 +127,28 @@ npm run test:backend
 
 Что делает blueprint:
 
-- frontend собирается из `frontend/` как static site;
+- frontend собирается командой `cd frontend && npm ci && npm run build`;
+- frontend публикует именно `frontend/dist`, а не корневой `dist`;
 - frontend использует `VITE_API_BASE_URL=https://front-tg-backend.onrender.com/api`;
 - frontend использует `HashRouter`, поэтому маршруты работают даже если static site создан вручную без SPA rewrite;
 - backend стартует командой `uvicorn server:app --host 0.0.0.0 --port $PORT`;
+- backend получает базовые env-переменные из `render.yaml`;
 - если на backend заданы `BOT_TOKEN`, `MINI_APP_URL`, `BACKEND_PUBLIC_URL` и `TELEGRAM_WEBHOOK_SECRET`, этот же web service автоматически регистрирует Telegram webhook на `/telegram/webhook`.
+
+Быстрый деплой через Blueprint:
+
+1. Запушь актуальный код в GitHub.
+2. В Render выбери `New +` -> `Blueprint`.
+3. Подключи репозиторий и подтверди создание сервисов из `render.yaml`.
+4. Для backend обязательно задай `BOT_TOKEN`, если нужен Telegram-бот.
+5. После первого деплоя проверь:
+   - frontend: `https://front-tg.onrender.com`
+   - backend health: `https://front-tg-backend.onrender.com/api/health`
+
+Если создаёшь сервисы вручную, для frontend укажи:
+
+- `Build Command`: `cd frontend && npm ci && npm run build`
+- `Publish Directory`: `frontend/dist`
 
 Важно для Telegram:
 

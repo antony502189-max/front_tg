@@ -1405,8 +1405,7 @@ class BackendASGIApp:
     def __init__(self, backend_app: BackendApp | None = None) -> None:
         self.backend_app = backend_app or BackendApp()
 
-    @staticmethod
-    async def handle_lifespan(receive: Any, send: Any) -> None:
+    async def handle_lifespan(self, receive: Any, send: Any) -> None:
         while True:
             message = await receive()
             message_type = message.get("type")

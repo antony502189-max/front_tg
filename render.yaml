@@ -2,9 +2,8 @@ services:
   - type: web
     name: front-tg
     runtime: static
-    rootDir: frontend
-    buildCommand: npm install && npm run build
-    staticPublishPath: dist
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: frontend/dist
     envVars:
       - key: VITE_API_BASE_URL
         value: https://front-tg-backend.onrender.com/api
@@ -18,3 +17,24 @@ services:
     buildCommand: pip install -r backend/requirements.txt
     startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
+    envVars:
+      - key: IIS_BASE_URL
+        value: https://iis.bsuir.by/api/v1
+      - key: CACHE_TTL_MS
+        value: 60000
+      - key: STALE_TTL_MS
+        value: 300000
+      - key: REQUEST_TIMEOUT_MS
+        value: 10000
+      - key: MAX_RETRIES
+        value: 2
+      - key: RETRY_DELAY_MS
+        value: 250
+      - key: MINI_APP_URL
+        value: https://front-tg.onrender.com
+      - key: BACKEND_PUBLIC_URL
+        value: https://front-tg-backend.onrender.com
+      - key: TELEGRAM_WEBHOOK_SECRET
+        generateValue: true
+      - key: BOT_TOKEN
+        sync: false

@@ -92,6 +92,47 @@ class BackendServerTests(unittest.TestCase):
         payload = json.loads(messages[1]["body"])
         self.assertTrue(payload["ok"])
 
+    def test_asgi_app_handles_lifespan_startup_and_shutdown(self) -> None:
+        bot_app = FakeWebhookBotApp()
+        backend_app = BackendApp(
+            config=TEST_CONFIG,
+            fetcher=lambda *_: {},
+            telegram_bot_app=bot_app,
+        )
+        app = create_asgi_app(backend_app)
+        messages: list[dict[str, object]] = []
+        received_messages = iter(
+            [
+                {"type": "lifespan.startup"},
+                {"type": "lifespan.shutdown"},
+            ]
+        )
+
+        async def receive() -> dict[str, object]:
+            return next(received_messages)
+
+        async def send(message: dict[str, object]) -> None:
+            messages.append(message)
+
+        asyncio.run(
+            app(
+                {
+                    "type": "lifespan",
+                },
+                receive,
+                send,
+            )
+        )
+
+        self.assertEqual(
+            messages,
+            [
+                {"type": "lifespan.startup.complete"},
+                {"type": "lifespan.shutdown.complete"},
+            ],
+        )
+        self.assertEqual(bot_app.setup_calls, 1)
+
     def test_root_request_returns_service_info(self) -> None:
         app = BackendApp(config=TEST_CONFIG, fetcher=lambda *_: {})
 
