@@ -1,3 +1,5 @@
+import asyncio
+import json
 import unittest
 from datetime import date
 from threading import Event, Lock
@@ -7,6 +9,7 @@ from backend.server import (
     CacheEntry,
     UpstreamRequestError,
     cache_key,
+    create_asgi_app,
     fetch_with_retry,
     normalize_auditories_response,
     normalize_employees_response,
@@ -33,6 +36,40 @@ TEST_CONFIG = {
 
 
 class BackendServerTests(unittest.TestCase):
+    def test_asgi_app_serves_health_response(self) -> None:
+        backend_app = BackendApp(config=TEST_CONFIG, fetcher=lambda *_: {})
+        app = create_asgi_app(backend_app)
+        messages: list[dict[str, object]] = []
+
+        async def receive() -> dict[str, object]:
+            return {
+                "type": "http.request",
+                "body": b"",
+                "more_body": False,
+            }
+
+        async def send(message: dict[str, object]) -> None:
+            messages.append(message)
+
+        asyncio.run(
+            app(
+                {
+                    "type": "http",
+                    "method": "GET",
+                    "path": "/api/health",
+                    "query_string": b"",
+                },
+                receive,
+                send,
+            )
+        )
+
+        self.assertEqual(messages[0]["type"], "http.response.start")
+        self.assertEqual(messages[0]["status"], 200)
+        self.assertEqual(messages[1]["type"], "http.response.body")
+        payload = json.loads(messages[1]["body"])
+        self.assertTrue(payload["ok"])
+
     def test_route_config_resolves_known_routes(self) -> None:
         self.assertEqual(route_config("/api/schedule").cache_namespace, "/schedule")
         self.assertEqual(route_config("/api/grades").query_param, "studentCardNumber")

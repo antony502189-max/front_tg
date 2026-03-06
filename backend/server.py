@@ -1223,6 +1223,110 @@ CORS_HEADERS = {
 }
 
 
+def build_raw_path_from_scope(scope: Mapping[str, Any]) -> str:
+    path = str(scope.get("path") or "/")
+    query_string = scope.get("query_string", b"")
+
+    if isinstance(query_string, bytes) and query_string:
+        return f"{path}?{query_string.decode('utf-8', errors='ignore')}"
+
+    return path
+
+
+def encode_response_headers(
+    response: Response,
+    body: bytes,
+) -> list[tuple[bytes, bytes]]:
+    headers = [
+        (key.lower().encode("ascii"), value.encode("utf-8"))
+        for key, value in CORS_HEADERS.items()
+    ]
+
+    if response.payload is None:
+        headers.append((b"content-length", b"0"))
+        return headers
+
+    headers.extend(
+        [
+            (b"content-type", b"application/json; charset=utf-8"),
+            (b"content-length", str(len(body)).encode("ascii")),
+        ]
+    )
+    return headers
+
+
+def encode_response_body(response: Response) -> bytes:
+    if response.payload is None:
+        return b""
+
+    return json.dumps(response.payload, ensure_ascii=False).encode("utf-8")
+
+
+async def drain_request_body(receive: Any) -> None:
+    while True:
+        message = await receive()
+        if message.get("type") != "http.request":
+            return
+        if not message.get("more_body", False):
+            return
+
+
+class BackendASGIApp:
+    def __init__(self, backend_app: BackendApp | None = None) -> None:
+        self.backend_app = backend_app or BackendApp()
+
+    @staticmethod
+    async def handle_lifespan(receive: Any, send: Any) -> None:
+        while True:
+            message = await receive()
+            message_type = message.get("type")
+
+            if message_type == "lifespan.startup":
+                await send({"type": "lifespan.startup.complete"})
+                continue
+
+            if message_type == "lifespan.shutdown":
+                await send({"type": "lifespan.shutdown.complete"})
+                return
+
+    async def __call__(self, scope: Mapping[str, Any], receive: Any, send: Any) -> None:
+        scope_type = scope.get("type")
+
+        if scope_type == "lifespan":
+            await self.handle_lifespan(receive, send)
+            return
+
+        if scope_type != "http":
+            return
+
+        await drain_request_body(receive)
+
+        method = str(scope.get("method") or "GET")
+        response = self.backend_app.handle_request(
+            method,
+            build_raw_path_from_scope(scope),
+        )
+        body = encode_response_body(response)
+
+        await send(
+            {
+                "type": "http.response.start",
+                "status": response.status_code,
+                "headers": encode_response_headers(response, body),
+            }
+        )
+        await send(
+            {
+                "type": "http.response.body",
+                "body": b"" if method == "HEAD" else body,
+            }
+        )
+
+
+def create_asgi_app(backend_app: BackendApp | None = None) -> BackendASGIApp:
+    return BackendASGIApp(backend_app)
+
+
 def create_handler(app: BackendApp) -> type[BaseHTTPRequestHandler]:
     class RequestHandler(BaseHTTPRequestHandler):
         def respond(self) -> None:
@@ -1237,7 +1341,7 @@ def create_handler(app: BackendApp) -> type[BaseHTTPRequestHandler]:
                 self.end_headers()
                 return
 
-            body = json.dumps(response.payload, ensure_ascii=False).encode("utf-8")
+            body = encode_response_body(response)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()

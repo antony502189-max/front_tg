@@ -117,7 +117,7 @@ npm run test:backend
 - `backend/requirements.txt` — файл Python-зависимостей;
 - `.python-version` — фиксирует ветку Python `3.13`.
 
-Render по документации ожидает, что web service слушает `0.0.0.0` и использует `PORT`. В проекте это уже учтено: локально backend по умолчанию остаётся на `127.0.0.1`, а в `render.yaml` для Render выставляется `HOST=0.0.0.0`.
+Для Render backend теперь можно запускать как ASGI-приложение командой `uvicorn server:app --host 0.0.0.0 --port $PORT`. При этом локальный запуск через `python -m backend.server` тоже сохраняется.
 
 ## Переменные окружения
 
