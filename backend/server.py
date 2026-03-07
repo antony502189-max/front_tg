@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import re
 import time
@@ -62,6 +63,7 @@ Fetcher = Callable[[str, dict[str, str]], JsonValue]
 NowFn = Callable[[], int]
 TodayFn = Callable[[], date]
 SERVICE_NAME = "front_tg_backend_python"
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -1767,6 +1769,16 @@ class BackendApp:
             student_group,
         )
 
+    def _find_student_rating_summary(
+        self,
+        student_card_number: str,
+        student_group: str | None,
+    ) -> dict[str, Any] | None:
+        return self.rating_service.find_student_rating_summary(
+            student_card_number,
+            student_group,
+        )
+
     def _fetch_current_week(self) -> int:
         return normalize_current_week(
             self.request_upstream("/schedule/current-week", {})
@@ -1877,6 +1889,7 @@ class BackendApp:
         query_value: str,
         *,
         student_group: str | None = None,
+        resolve_student_card_summary: bool = False,
     ) -> JsonValue:
         search_payload = None
         rating_payload = None
@@ -1917,13 +1930,55 @@ class BackendApp:
                 except UpstreamRequestError as error:
                     search_error = error
         else:
-            fetch_result: StudentRatingFetchResult = (
-                self.rating_service.fetch_student_rating_sources(query_value)
-            )
-            search_payload = fetch_result.search_payload
-            rating_payload = fetch_result.rating_payload
-            search_error = fetch_result.search_error
-            rating_error = fetch_result.rating_error
+            summary_error: UpstreamRequestError | None = None
+
+            if resolve_student_card_summary:
+                futures = {
+                    "sources": GRADES_EXECUTOR.submit(
+                        self.rating_service.fetch_student_rating_sources,
+                        query_value,
+                    ),
+                    "summary": GRADES_EXECUTOR.submit(
+                        self._find_student_rating_summary,
+                        query_value,
+                        None,
+                    ),
+                }
+
+                for key, future in futures.items():
+                    try:
+                        result = future.result()
+                    except UpstreamRequestError as error:
+                        if key == "summary":
+                            summary_error = error
+                        else:
+                            raise
+                        continue
+
+                    if key == "summary":
+                        extra_summary = result
+                        continue
+
+                    fetch_result = result
+                    search_payload = fetch_result.search_payload
+                    rating_payload = fetch_result.rating_payload
+                    search_error = fetch_result.search_error
+                    rating_error = fetch_result.rating_error
+            else:
+                fetch_result = self.rating_service.fetch_student_rating_sources(
+                    query_value
+                )
+                search_payload = fetch_result.search_payload
+                rating_payload = fetch_result.rating_payload
+                search_error = fetch_result.search_error
+                rating_error = fetch_result.rating_error
+
+            if summary_error is not None:
+                LOGGER.warning(
+                    "Student rating summary lookup failed for %s: %s",
+                    query_value,
+                    summary_error.message,
+                )
 
         if search_payload is None and rating_payload is None:
             if search_error is not None and search_error.status == 404:
@@ -1941,7 +1996,7 @@ class BackendApp:
                 else rating_error.message if rating_error is not None else None
             )
 
-        if student_group is None:
+        if student_group is None and not resolve_student_card_summary:
             extra_summary = self._find_group_rating_summary(query_value, student_group)
 
         return normalize_grades_response(
@@ -2142,6 +2197,7 @@ class BackendApp:
             lambda: self._build_grades_payload(
                 student_card_number,
                 student_group=student_group,
+                resolve_student_card_summary=True,
             ),
         )
 

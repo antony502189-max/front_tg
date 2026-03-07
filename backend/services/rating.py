@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import math
 import re
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from threading import Lock
 from typing import Any, Callable, Mapping
@@ -22,10 +22,22 @@ RATING_DIRECTORY_CACHE_TTL_MS = 3_600_000
 TIMEOUT_ERROR_MARKERS = (
     "timed out",
     "timeout",
-    "РІСЂРµРјСЏ РѕР¶РёРґР°РЅРёСЏ",
+    "время ожидания",
     "time out",
 )
 RATING_EXECUTOR = ThreadPoolExecutor(max_workers=4)
+KNOWN_FACULTY_PREFIX_HINTS: dict[str, tuple[str, ...]] = {
+    "45": ("20026",),
+    "50": ("20002",),
+    "51": ("20017",),
+    "52": ("20005",),
+    "53": ("20000",),
+    "54": ("20035",),
+    "55": ("20026",),
+    "56": ("20040",),
+    "57": ("20012",),
+    "58": ("20033",),
+}
 
 
 @dataclass
@@ -34,6 +46,34 @@ class StudentRatingFetchResult:
     rating_payload: JsonValue | None = None
     search_error: Exception | None = None
     rating_error: Exception | None = None
+
+
+@dataclass(frozen=True)
+class RatingListCandidate:
+    faculty_id: str
+    speciality_id: str
+    course: int
+    speciality: str | None = None
+    text: str | None = None
+
+    def cache_entry(self) -> dict[str, str]:
+        entry = {
+            "facultyId": self.faculty_id,
+            "specialityId": self.speciality_id,
+            "course": str(self.course),
+        }
+
+        if self.speciality:
+            entry["speciality"] = self.speciality
+
+        return entry
+
+
+@dataclass(frozen=True)
+class RatingCandidateScanResult:
+    summary: dict[str, Any] | None
+    faculty_prefixes: tuple[str, ...]
+    student_card_prefixes: tuple[str, ...]
 
 
 def unwrap_value_list(payload: Any) -> list[Any] | None:
@@ -142,7 +182,7 @@ def extract_rating_speciality_name(text: str | None) -> str | None:
         return None
 
     match = re.match(
-        r"^\([^)]+\)\s*(.+?)\s+\(\d+\s+СЃС‚СѓРїРµРЅСЊ",
+        r"^\([^)]+\)\s*(.+?)\s+\(\d+\s+ступень",
         normalized_text,
         flags=re.IGNORECASE,
     )
@@ -302,6 +342,9 @@ class RatingService:
         self._rating_speciality_index: list[dict[str, str]] = []
         self._rating_speciality_index_fresh_until = 0
         self._rating_courses_cache: dict[tuple[str, str], tuple[int, list[int]]] = {}
+        self._student_card_prefix_candidates: dict[str, list[dict[str, str]]] = {}
+        self._faculty_prefix_candidates: dict[str, list[str]] = {}
+        self._student_card_prefix_index_fresh_until = 0
 
     def request_grades_search(self, student_card_number: str) -> JsonValue:
         search_path = "/rating/studentSearch"
@@ -580,7 +623,7 @@ class RatingService:
             ]
 
         inferred_course = infer_course_from_group(normalized_group)
-        rating_candidates: list[tuple[dict[str, str], list[int]]] = []
+        rating_candidates: list[RatingListCandidate] = []
 
         for speciality_candidate in [*speciality_candidates, *related_candidates]:
             faculty_id = speciality_candidate["facultyId"]
@@ -609,44 +652,350 @@ class RatingService:
             if not candidate_courses:
                 continue
 
-            rating_candidates.append((speciality_candidate, candidate_courses))
-
-        for speciality_candidate, candidate_courses in rating_candidates:
-            speciality_id = speciality_candidate["specialityId"]
-
+            speciality_name = extract_rating_speciality_name(speciality_candidate["text"])
             for course in candidate_courses:
-                try:
-                    payload = self.request_upstream_with_timeout(
-                        "/rating",
-                        {
-                            "sdef": speciality_id,
-                            "course": str(course),
-                        },
-                        max(self.request_timeout_ms, GRADES_RATING_LIST_TIMEOUT_MS),
-                        0,
+                rating_candidates.append(
+                    RatingListCandidate(
+                        faculty_id=faculty_id,
+                        speciality_id=speciality_id,
+                        course=course,
+                        speciality=speciality_name,
+                        text=speciality_candidate["text"],
                     )
+                )
+
+        for candidate in rating_candidates:
+            try:
+                payload = self.request_upstream_with_timeout(
+                    "/rating",
+                    {
+                        "sdef": candidate.speciality_id,
+                        "course": str(candidate.course),
+                    },
+                    max(self.request_timeout_ms, GRADES_RATING_LIST_TIMEOUT_MS),
+                    0,
+                )
+            except Exception as error:
+                if not isinstance(error, self.upstream_error_cls):
+                    raise
+
+                LOGGER.debug(
+                    "Rating list lookup failed for faculty %s speciality %s course %s: %s",
+                    candidate.faculty_id,
+                    candidate.speciality_id,
+                    candidate.course,
+                    error_message(error),
+                )
+                continue
+
+            summary = build_rating_list_summary(
+                payload,
+                student_card_number,
+                speciality=speciality_abbrev,
+            )
+            if summary is not None:
+                return summary
+
+        return fallback_summary
+
+    def find_student_rating_summary(
+        self,
+        student_card_number: str,
+        student_group: str | None = None,
+    ) -> dict[str, Any] | None:
+        group_summary = None
+        normalized_group = first_non_empty_string(student_group)
+        if normalized_group is not None:
+            group_summary = self.find_group_rating_summary(
+                student_card_number,
+                normalized_group,
+            )
+            if isinstance(group_summary, Mapping) and group_summary.get("position") is not None:
+                return dict(group_summary)
+
+        card_summary = self.find_student_card_rating_summary(student_card_number)
+        if card_summary is None:
+            return dict(group_summary) if isinstance(group_summary, Mapping) else None
+
+        if not isinstance(group_summary, Mapping):
+            return card_summary
+
+        merged_summary = dict(card_summary)
+        speciality = first_non_empty_string(group_summary.get("speciality"))
+        if speciality is not None:
+            merged_summary["speciality"] = speciality
+
+        return merged_summary
+
+    def find_student_card_rating_summary(
+        self,
+        student_card_number: str,
+    ) -> dict[str, Any] | None:
+        normalized_student_card_number = "".join(str(student_card_number).split())
+        if not re.fullmatch(r"\d{5,32}", normalized_student_card_number):
+            return None
+
+        student_card_prefix = normalized_student_card_number[:5]
+        faculty_prefix = normalized_student_card_number[:2]
+
+        cached_candidates = self._get_cached_student_card_candidates(student_card_prefix)
+        if cached_candidates:
+            summary = self._scan_rating_candidates(
+                normalized_student_card_number,
+                cached_candidates,
+            )
+            if summary is not None:
+                return summary
+
+        faculty_ids = self._get_faculty_candidates_for_prefix(faculty_prefix)
+        summary = self._scan_rating_candidates(
+            normalized_student_card_number,
+            self._build_rating_candidates_for_faculties(faculty_ids),
+        )
+        if summary is not None:
+            return summary
+
+        all_faculty_ids = self._get_all_faculty_ids()
+        remaining_faculty_ids = [
+            faculty_id for faculty_id in all_faculty_ids if faculty_id not in faculty_ids
+        ]
+        if not remaining_faculty_ids:
+            return None
+
+        return self._scan_rating_candidates(
+            normalized_student_card_number,
+            self._build_rating_candidates_for_faculties(remaining_faculty_ids),
+        )
+
+    def _fetch_rating_candidate(
+        self,
+        candidate: RatingListCandidate,
+        student_card_number: str,
+    ) -> RatingCandidateScanResult:
+        payload = self.request_upstream_with_timeout(
+            "/rating",
+            {
+                "sdef": candidate.speciality_id,
+                "course": str(candidate.course),
+            },
+            max(self.request_timeout_ms, GRADES_RATING_LIST_TIMEOUT_MS),
+            0,
+        )
+        items = unwrap_value_list(payload) or payload
+        faculty_prefixes: set[str] = set()
+        student_card_prefixes: set[str] = set()
+
+        if isinstance(items, list):
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+
+                raw_student_card = first_non_empty_string(item.get("studentCardNumber"))
+                if raw_student_card is None:
+                    continue
+
+                normalized_student_card = "".join(raw_student_card.split())
+                if len(normalized_student_card) >= 2:
+                    faculty_prefixes.add(normalized_student_card[:2])
+                if len(normalized_student_card) >= 5:
+                    student_card_prefixes.add(normalized_student_card[:5])
+
+        return RatingCandidateScanResult(
+            summary=build_rating_list_summary(
+                payload,
+                student_card_number,
+                speciality=candidate.speciality,
+            ),
+            faculty_prefixes=tuple(sorted(faculty_prefixes)),
+            student_card_prefixes=tuple(sorted(student_card_prefixes)),
+        )
+
+    def _scan_rating_candidates(
+        self,
+        student_card_number: str,
+        candidates: list[RatingListCandidate],
+    ) -> dict[str, Any] | None:
+        if not candidates:
+            return None
+
+        futures = {
+            RATING_EXECUTOR.submit(
+                self._fetch_rating_candidate,
+                candidate,
+                student_card_number,
+            ): candidate
+            for candidate in candidates
+        }
+
+        try:
+            for future in as_completed(futures):
+                candidate = futures[future]
+
+                try:
+                    result = future.result()
                 except Exception as error:
                     if not isinstance(error, self.upstream_error_cls):
                         raise
 
                     LOGGER.debug(
                         "Rating list lookup failed for faculty %s speciality %s course %s: %s",
-                        faculty_id,
-                        speciality_id,
-                        course,
+                        candidate.faculty_id,
+                        candidate.speciality_id,
+                        candidate.course,
                         error_message(error),
                     )
                     continue
 
-                summary = build_rating_list_summary(
-                    payload,
-                    student_card_number,
-                    speciality=speciality_abbrev,
-                )
-                if summary is not None:
-                    return summary
+                self._remember_candidate_prefixes(candidate, result)
+                if result.summary is not None:
+                    return result.summary
+        finally:
+            for future in futures:
+                future.cancel()
 
-        return fallback_summary
+        return None
+
+    def _build_rating_candidates_for_faculties(
+        self,
+        faculty_ids: list[str],
+    ) -> list[RatingListCandidate]:
+        if not faculty_ids:
+            return []
+
+        faculty_id_set = set(faculty_ids)
+        speciality_index = self.get_rating_speciality_index()
+        candidates: list[RatingListCandidate] = []
+
+        for item in speciality_index:
+            faculty_id = item["facultyId"]
+            if faculty_id not in faculty_id_set:
+                continue
+
+            speciality_id = item["specialityId"]
+            try:
+                courses = self.get_rating_courses(faculty_id, speciality_id)
+            except Exception as error:
+                if not isinstance(error, self.upstream_error_cls):
+                    raise
+
+                LOGGER.debug(
+                    "Rating courses lookup failed for faculty %s speciality %s: %s",
+                    faculty_id,
+                    speciality_id,
+                    error_message(error),
+                )
+                continue
+
+            speciality_name = extract_rating_speciality_name(item["text"])
+            for course in courses:
+                candidates.append(
+                    RatingListCandidate(
+                        faculty_id=faculty_id,
+                        speciality_id=speciality_id,
+                        course=course,
+                        speciality=speciality_name,
+                        text=item["text"],
+                    )
+                )
+
+        return candidates
+
+    def _get_all_faculty_ids(self) -> list[str]:
+        faculty_ids = {
+            item["facultyId"]
+            for item in self.get_rating_speciality_index()
+            if item.get("facultyId")
+        }
+        return sorted(faculty_ids)
+
+    def _get_cached_student_card_candidates(
+        self,
+        student_card_prefix: str,
+    ) -> list[RatingListCandidate]:
+        now_value = self.now_ms()
+
+        with self.lock:
+            self._reset_student_card_prefix_index_if_stale(now_value)
+            cached_entries = list(
+                self._student_card_prefix_candidates.get(student_card_prefix, [])
+            )
+
+        result: list[RatingListCandidate] = []
+        for entry in cached_entries:
+            course = first_finite_number(entry.get("course"))
+            faculty_id = first_non_empty_string(entry.get("facultyId"))
+            speciality_id = first_non_empty_string(entry.get("specialityId"))
+            if course is None or faculty_id is None or speciality_id is None:
+                continue
+
+            result.append(
+                RatingListCandidate(
+                    faculty_id=faculty_id,
+                    speciality_id=speciality_id,
+                    course=int(course),
+                    speciality=first_non_empty_string(entry.get("speciality")),
+                )
+            )
+
+        return result
+
+    def _get_faculty_candidates_for_prefix(self, faculty_prefix: str) -> list[str]:
+        normalized_prefix = faculty_prefix.strip()
+        seeded_candidates = list(KNOWN_FACULTY_PREFIX_HINTS.get(normalized_prefix, ()))
+        now_value = self.now_ms()
+
+        with self.lock:
+            self._reset_student_card_prefix_index_if_stale(now_value)
+            cached_candidates = list(
+                self._faculty_prefix_candidates.get(normalized_prefix, [])
+            )
+
+        ordered_candidates: list[str] = []
+        for faculty_id in [*seeded_candidates, *cached_candidates]:
+            if faculty_id and faculty_id not in ordered_candidates:
+                ordered_candidates.append(faculty_id)
+
+        return ordered_candidates or self._get_all_faculty_ids()
+
+    def _remember_candidate_prefixes(
+        self,
+        candidate: RatingListCandidate,
+        result: RatingCandidateScanResult,
+    ) -> None:
+        if not result.faculty_prefixes and not result.student_card_prefixes:
+            return
+
+        cache_entry = candidate.cache_entry()
+        now_value = self.now_ms()
+
+        with self.lock:
+            self._reset_student_card_prefix_index_if_stale(now_value)
+
+            for faculty_prefix in result.faculty_prefixes:
+                cached_faculty_ids = self._faculty_prefix_candidates.setdefault(
+                    faculty_prefix,
+                    [],
+                )
+                if candidate.faculty_id not in cached_faculty_ids:
+                    cached_faculty_ids.append(candidate.faculty_id)
+
+            for student_card_prefix in result.student_card_prefixes:
+                cached_candidates = self._student_card_prefix_candidates.setdefault(
+                    student_card_prefix,
+                    [],
+                )
+                if cache_entry not in cached_candidates:
+                    cached_candidates.append(dict(cache_entry))
+
+    def _reset_student_card_prefix_index_if_stale(self, now_value: int) -> None:
+        if now_value <= self._student_card_prefix_index_fresh_until:
+            return
+
+        self._student_card_prefix_candidates = {}
+        self._faculty_prefix_candidates = {}
+        self._student_card_prefix_index_fresh_until = (
+            now_value + RATING_DIRECTORY_CACHE_TTL_MS
+        )
 
 
 __all__ = [
