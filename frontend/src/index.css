@@ -1586,7 +1586,7 @@ body {
 }
 
 .study-kicker {
-  color: rgba(15, 118, 110, 0.12);
+  color: #0b3a8f;
 }
 
 .onboarding-lead {
@@ -2078,7 +2078,7 @@ body {
   min-height: 28px;
   border-radius: 999px;
   background: rgba(47, 157, 93, 0.1);
-  color: rgba(29, 109, 65, 0.12);
+  color: #0b3a8f;
   font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
@@ -2202,7 +2202,7 @@ body {
 
 .univer-kicker {
   background: rgba(14, 165, 233, 0.12);
-  color: rgba(3, 105, 161, 0.12);
+  color: #0b3a8f;
 }
 
 .univer-search-input-wrapper {
