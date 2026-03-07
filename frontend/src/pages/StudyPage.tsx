@@ -30,13 +30,17 @@ export const StudyPage = () => {
   )
 
   const normalizedStudentCardNumber = studentCardNumber.trim()
+  const normalizedGroupNumber = groupNumber.trim()
   const hasStudentCardNumber = normalizedStudentCardNumber.length > 0
   const canLoadGrades = role === 'student' && hasStudentCardNumber
 
   const loadGrades = useCallback(
     (signal: AbortSignal) =>
-      fetchGrades(normalizedStudentCardNumber, signal),
-    [normalizedStudentCardNumber],
+      fetchGrades(normalizedStudentCardNumber, {
+        groupNumber: normalizedGroupNumber,
+        signal,
+      }),
+    [normalizedGroupNumber, normalizedStudentCardNumber],
   )
 
   const {
@@ -47,7 +51,9 @@ export const StudyPage = () => {
     hasResolvedCurrentRequest,
   } = useAsyncResource<GradesResponse | null>({
     enabled: canLoadGrades,
-    requestKey: canLoadGrades ? normalizedStudentCardNumber : null,
+    requestKey: canLoadGrades
+      ? `${normalizedStudentCardNumber}:${normalizedGroupNumber}`
+      : null,
     initialData: null,
     load: loadGrades,
     getErrorMessage: (requestError) =>

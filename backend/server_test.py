@@ -12,6 +12,7 @@ from backend.server import (
     cache_key,
     create_asgi_app,
     fetch_with_retry,
+    matches_rating_speciality,
     normalize_auditories_response,
     normalize_employees_response,
     extract_grade_subjects,
@@ -678,6 +679,45 @@ class BackendServerTests(unittest.TestCase):
         self.assertEqual(normalized["summary"]["position"], 12)
         self.assertEqual(normalized["summary"]["speciality"], "CS")
 
+    def test_normalize_grades_response_merges_extra_summary_fields(self) -> None:
+        normalized = normalize_grades_response(
+            "123456",
+            {"studentCardNumber": "123456", "average": 8.4},
+            rating_payload={},
+            extra_summary={"position": 2, "speciality": "CS"},
+        )
+
+        self.assertEqual(
+            normalized["summary"],
+            {"average": 8.4, "position": 2, "speciality": "CS"},
+        )
+
+    def test_normalize_grades_response_merges_search_and_rating_summary(self) -> None:
+        normalized = normalize_grades_response(
+            "123456",
+            {"studentCardNumber": "123456", "average": 8.4},
+            rating_payload={"ratingPlace": 2, "specialityName": "CS"},
+        )
+
+        self.assertEqual(
+            normalized["summary"],
+            {"average": 8.4, "position": 2, "speciality": "CS"},
+        )
+
+    def test_matches_rating_speciality_accepts_track_suffix(self) -> None:
+        self.assertTrue(
+            matches_rating_speciality(
+                "(6-05-0611-06) CS (AI) (1 ступень дневная)",
+                "CS",
+            )
+        )
+        self.assertFalse(
+            matches_rating_speciality(
+                "(6-05-0611-02) IB (1 ступень дневная)",
+                "CS",
+            )
+        )
+
 
     def test_extract_grade_summary_handles_wrapped_rating_payload(self) -> None:
         rating_payload = {
@@ -851,6 +891,74 @@ class BackendServerTests(unittest.TestCase):
         self.assertEqual(search_calls, 2)
         self.assertEqual(response.payload["summary"]["average"], 8.4)
         self.assertEqual(response.payload["summary"]["position"], 2)
+
+    def test_grades_route_computes_position_from_group_rating(self) -> None:
+        def fetcher(path: str, params: dict[str, str]):
+            if path == "/rating/studentSearch":
+                return {"studentCardNumber": "123"}
+
+            if path == "/rating/studentRating":
+                return {
+                    "subjects": [
+                        {
+                            "id": "math",
+                            "subject": "Math",
+                            "marks": [{"value": 9}],
+                        }
+                    ]
+                }
+
+            if path == "/student-groups/filters":
+                self.assertEqual(params, {"name": "353502"})
+                return [
+                    {
+                        "id": 1,
+                        "name": "353502",
+                        "specialityAbbrev": "CS",
+                    }
+                ]
+
+            if path == "/schedule/faculties":
+                return [{"id": 20040, "text": "Faculty"}]
+
+            if path == "/rating/specialities":
+                self.assertEqual(params, {"facultyId": "20040"})
+                return [
+                    {
+                        "id": 20655,
+                        "text": "(6-05-0611-06) CS (1 ступень дневная)",
+                    }
+                ]
+
+            if path == "/rating/courses":
+                self.assertEqual(
+                    params,
+                    {"facultyId": "20040", "specialityId": "20655"},
+                )
+                return [{"course": 3, "hasForeignPlan": False}]
+
+            if path == "/rating":
+                self.assertEqual(params, {"sdef": "20655", "course": "3"})
+                return [
+                    {"studentCardNumber": "321", "average": 9.1},
+                    {"studentCardNumber": "123", "average": 8.4},
+                    {"studentCardNumber": "222", "average": 7.9},
+                ]
+
+            raise AssertionError(f"Unexpected path: {path}")
+
+        app = BackendApp(config=TEST_CONFIG, fetcher=fetcher)
+
+        response = app.handle_request(
+            "GET",
+            "/api/grades?studentCardNumber=123&studentGroup=353502",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.payload["summary"]["average"], 8.4)
+        self.assertEqual(response.payload["summary"]["position"], 2)
+        self.assertEqual(response.payload["summary"]["speciality"], "CS")
+        self.assertEqual(response.payload["subjects"][0]["subject"], "Math")
 
     def test_grades_route_requests_upstream_sources_in_parallel(self) -> None:
         release = Event()

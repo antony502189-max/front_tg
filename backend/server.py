@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, replace
@@ -90,6 +91,8 @@ RUSSIAN_WEEKDAY_TO_INDEX = {
 }
 
 GRADES_SEARCH_TIMEOUT_MS = 4_000
+GRADES_RATING_LIST_TIMEOUT_MS = 25_000
+RATING_DIRECTORY_CACHE_TTL_MS = 3_600_000
 TIMEOUT_ERROR_MARKERS = (
     "timed out",
     "timeout",
@@ -1046,6 +1049,136 @@ def find_student_card_match(
     return None
 
 
+def merge_grade_summaries(*summaries: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    merged: dict[str, Any] = {}
+
+    for summary in summaries:
+        if not isinstance(summary, Mapping):
+            continue
+
+        average = first_finite_number(summary.get("average"))
+        if average is not None and "average" not in merged:
+            merged["average"] = average
+
+        position = first_finite_number(summary.get("position"))
+        if position is not None and "position" not in merged:
+            merged["position"] = int(position)
+
+        speciality = first_non_empty_string(summary.get("speciality"))
+        if speciality is not None and "speciality" not in merged:
+            merged["speciality"] = speciality
+
+    return merged or None
+
+
+def infer_course_from_group(student_group: str | None) -> int | None:
+    if not isinstance(student_group, str):
+        return None
+
+    normalized_group = student_group.strip()
+    if not normalized_group or not normalized_group[0].isdigit():
+        return None
+
+    course = int(normalized_group[0])
+    return course if 1 <= course <= 6 else None
+
+
+def normalize_course_values(payload: Any) -> list[int]:
+    items = unwrap_value_list(payload) or payload
+    if not isinstance(items, list):
+        return []
+
+    normalized_courses: list[int] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+
+        course = first_finite_number(item.get("course"))
+        if course is None:
+            continue
+
+        course_value = int(course)
+        if course_value not in normalized_courses:
+            normalized_courses.append(course_value)
+
+    return normalized_courses
+
+
+def extract_rating_speciality_name(text: str | None) -> str | None:
+    if not isinstance(text, str):
+        return None
+
+    normalized_text = text.strip()
+    if not normalized_text:
+        return None
+
+    match = re.match(
+        r"^\([^)]+\)\s*(.+?)\s+\(\d+\s+ступень",
+        normalized_text,
+        flags=re.IGNORECASE,
+    )
+    if match is not None:
+        return match.group(1).strip() or None
+
+    return normalized_text
+
+
+def matches_rating_speciality(text: str, speciality_abbrev: str) -> bool:
+    normalized_text = normalize_lookup_value(
+        extract_rating_speciality_name(text) or text
+    )
+    normalized_abbrev = normalize_lookup_value(speciality_abbrev)
+
+    if not normalized_text or not normalized_abbrev:
+        return False
+
+    return normalized_text == normalized_abbrev or normalized_text.startswith(
+        f"{normalized_abbrev}("
+    )
+
+
+def build_rating_list_summary(
+    payload: Any,
+    student_card_number: str,
+    *,
+    speciality: str | None = None,
+) -> dict[str, Any] | None:
+    items = unwrap_value_list(payload) or payload
+    if not isinstance(items, list):
+        return None
+
+    normalized_items = [item for item in items if isinstance(item, dict)]
+    normalized_items.sort(
+        key=lambda item: first_finite_number(
+            item.get("average"),
+            item.get("averageMark"),
+            item.get("avgRating"),
+            item.get("averageScore"),
+            item.get("gpa"),
+        )
+        or float("-inf"),
+        reverse=True,
+    )
+
+    normalized_student_card_number = normalize_lookup_value(student_card_number)
+    for index, item in enumerate(normalized_items):
+        if (
+            normalize_lookup_value(item.get("studentCardNumber"))
+            != normalized_student_card_number
+        ):
+            continue
+
+        summary = extract_grade_summary_from_record(item) or {}
+        summary["position"] = index + 1
+
+        if speciality is not None and "speciality" not in summary:
+            summary["speciality"] = speciality
+
+        return summary
+
+    return None
+
+
 def normalize_mark(raw_mark: Any) -> dict[str, Any] | None:
     if isinstance(raw_mark, bool):
         return None
@@ -1370,11 +1503,14 @@ def normalize_grades_response(
     student_card_number: str,
     search_payload: Any,
     rating_payload: Any,
+    extra_summary: Mapping[str, Any] | None = None,
     warning: str | None = None,
 ) -> dict[str, Any]:
     matched_student = find_student_card_match(search_payload, student_card_number)
-    summary = extract_grade_summary(matched_student) or extract_grade_summary(
-        rating_payload
+    summary = merge_grade_summaries(
+        extract_grade_summary(matched_student),
+        extract_grade_summary(rating_payload),
+        extra_summary,
     )
     subjects = extract_grade_subjects(rating_payload)
 
@@ -1440,6 +1576,9 @@ class BackendApp:
         self.profile_store = profile_store or UserProfileStore()
         self._inflight_requests: dict[str, Future[JsonValue]] = {}
         self._timeout_fetchers: dict[int, Fetcher] = {}
+        self._rating_speciality_index: list[dict[str, str]] = []
+        self._rating_speciality_index_fresh_until = 0
+        self._rating_courses_cache: dict[tuple[str, str], tuple[int, list[int]]] = {}
         self._route_payload_builders = {
             "employees": self._build_employees_payload,
             "auditories": self._build_auditories_payload,
@@ -1548,6 +1687,231 @@ class BackendApp:
 
             raise
 
+    def _get_rating_speciality_index(self) -> list[dict[str, str]]:
+        now_value = self.now_ms()
+
+        with self.lock:
+            if now_value <= self._rating_speciality_index_fresh_until:
+                return list(self._rating_speciality_index)
+
+        faculties_payload = self.request_upstream("/schedule/faculties", {})
+        faculty_items = unwrap_value_list(faculties_payload) or faculties_payload
+        if not isinstance(faculty_items, list):
+            return []
+
+        futures: dict[str, Future[JsonValue]] = {}
+        faculty_ids: list[str] = []
+
+        for item in faculty_items:
+            if not isinstance(item, dict):
+                continue
+
+            raw_faculty_id = item.get("id")
+            if raw_faculty_id is None:
+                continue
+
+            faculty_id = str(raw_faculty_id).strip()
+            if not faculty_id:
+                continue
+
+            faculty_ids.append(faculty_id)
+            futures[faculty_id] = GRADES_EXECUTOR.submit(
+                self.request_upstream,
+                "/rating/specialities",
+                {"facultyId": faculty_id},
+            )
+
+        index: list[dict[str, str]] = []
+        for faculty_id in faculty_ids:
+            future = futures.get(faculty_id)
+            if future is None:
+                continue
+
+            try:
+                payload = future.result()
+            except UpstreamRequestError:
+                continue
+
+            speciality_items = unwrap_value_list(payload) or payload
+            if not isinstance(speciality_items, list):
+                continue
+
+            for item in speciality_items:
+                if not isinstance(item, dict):
+                    continue
+
+                raw_speciality_id = item.get("id")
+                text = first_non_empty_field(item, "text", "name")
+                if raw_speciality_id is None or text is None:
+                    continue
+
+                speciality_id = str(raw_speciality_id).strip()
+                if not speciality_id:
+                    continue
+
+                index.append(
+                    {
+                        "facultyId": faculty_id,
+                        "specialityId": speciality_id,
+                        "text": text,
+                    }
+                )
+
+        fresh_until = now_value + RATING_DIRECTORY_CACHE_TTL_MS
+        with self.lock:
+            if now_value > self._rating_speciality_index_fresh_until:
+                self._rating_speciality_index = index
+                self._rating_speciality_index_fresh_until = fresh_until
+
+            return list(self._rating_speciality_index)
+
+    def _get_rating_courses(self, faculty_id: str, speciality_id: str) -> list[int]:
+        cache_key_value = (faculty_id, speciality_id)
+        now_value = self.now_ms()
+
+        with self.lock:
+            cached_entry = self._rating_courses_cache.get(cache_key_value)
+            if cached_entry is not None:
+                fresh_until, cached_courses = cached_entry
+                if now_value <= fresh_until:
+                    return list(cached_courses)
+
+        payload = self.request_upstream(
+            "/rating/courses",
+            {
+                "facultyId": faculty_id,
+                "specialityId": speciality_id,
+            },
+        )
+        courses = normalize_course_values(payload)
+
+        with self.lock:
+            self._rating_courses_cache[cache_key_value] = (
+                now_value + RATING_DIRECTORY_CACHE_TTL_MS,
+                list(courses),
+            )
+
+        return courses
+
+    def _find_group_info(self, student_group: str) -> dict[str, Any] | None:
+        payload = self.request_upstream(
+            "/student-groups/filters",
+            {"name": student_group},
+        )
+        items = unwrap_value_list(payload) or payload
+        if not isinstance(items, list):
+            return None
+
+        normalized_group = normalize_lookup_value(student_group)
+        partial_match: dict[str, Any] | None = None
+
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+
+            name = first_non_empty_field(item, "name", "text")
+            if name is None:
+                continue
+
+            normalized_name = normalize_lookup_value(name)
+            if normalized_name == normalized_group:
+                return item
+
+            if partial_match is None and normalized_group in normalized_name:
+                partial_match = item
+
+        return partial_match
+
+    def _find_group_rating_summary(
+        self,
+        student_card_number: str,
+        student_group: str | None,
+    ) -> dict[str, Any] | None:
+        normalized_group = first_non_empty_string(student_group)
+        if normalized_group is None:
+            return None
+
+        try:
+            group_info = self._find_group_info(normalized_group)
+        except UpstreamRequestError:
+            return None
+
+        if group_info is None:
+            return None
+
+        speciality_abbrev = first_non_empty_field(
+            group_info,
+            "specialityAbbrev",
+            "speciality",
+            "specialityName",
+        )
+        fallback_summary = (
+            {"speciality": speciality_abbrev} if speciality_abbrev is not None else None
+        )
+        if speciality_abbrev is None:
+            return None
+
+        try:
+            speciality_index = self._get_rating_speciality_index()
+        except UpstreamRequestError:
+            return fallback_summary
+
+        speciality_candidates = [
+            item
+            for item in speciality_index
+            if matches_rating_speciality(item["text"], speciality_abbrev)
+        ]
+        if not speciality_candidates:
+            return fallback_summary
+
+        inferred_course = infer_course_from_group(normalized_group)
+        for speciality_candidate in speciality_candidates:
+            faculty_id = speciality_candidate["facultyId"]
+            speciality_id = speciality_candidate["specialityId"]
+
+            try:
+                available_courses = self._get_rating_courses(faculty_id, speciality_id)
+            except UpstreamRequestError:
+                continue
+
+            candidate_courses = list(available_courses)
+            if inferred_course is not None and inferred_course in available_courses:
+                candidate_courses = [
+                    inferred_course,
+                    *[
+                        course
+                        for course in available_courses
+                        if course != inferred_course
+                    ],
+                ]
+
+            for course in candidate_courses:
+                try:
+                    payload = self.request_upstream_with_timeout(
+                        "/rating",
+                        {
+                            "sdef": speciality_id,
+                            "course": str(course),
+                        },
+                        timeout_ms=max(
+                            self.config.request_timeout_ms,
+                            GRADES_RATING_LIST_TIMEOUT_MS,
+                        ),
+                        max_retries=0,
+                    )
+                except UpstreamRequestError:
+                    continue
+
+                summary = build_rating_list_summary(
+                    payload,
+                    student_card_number,
+                    speciality=speciality_abbrev,
+                )
+                if summary is not None:
+                    return summary
+
+        return fallback_summary
+
     def _fetch_current_week(self) -> int:
         return normalize_current_week(
             self.request_upstream("/schedule/current-week", {})
@@ -1653,7 +2017,12 @@ class BackendApp:
         auditories_payload = self.request_upstream("/auditories", {})
         return normalize_auditories_response(auditories_payload, query_value)
 
-    def _build_grades_payload(self, query_value: str) -> JsonValue:
+    def _build_grades_payload(
+        self,
+        query_value: str,
+        *,
+        student_group: str | None = None,
+    ) -> JsonValue:
         search_payload = None
         rating_payload = None
         search_error: UpstreamRequestError | None = None
@@ -1713,10 +2082,12 @@ class BackendApp:
                 else rating_error.message if rating_error is not None else None
             )
 
+        extra_summary = self._find_group_rating_summary(query_value, student_group)
         return normalize_grades_response(
             query_value,
             search_payload,
             rating_payload,
+            extra_summary=extra_summary,
             warning=warning,
         )
 
@@ -1863,6 +2234,28 @@ class BackendApp:
                 teacher_employee_id=teacher_employee_id,
                 reference_date=reference_date,
                 view=view,
+            ),
+        )
+
+    def _handle_grades_request(self, parsed_url: Any) -> Response:
+        student_card_number = first_query_value(parsed_url, "studentCardNumber")
+        if student_card_number is None:
+            return Response(
+                400,
+                {"error": 'Query param "studentCardNumber" is required'},
+            )
+
+        student_group = first_query_value(parsed_url, "studentGroup")
+        params = {"studentCardNumber": student_card_number}
+        if student_group is not None:
+            params["studentGroup"] = student_group
+
+        key = cache_key("/grades", params)
+        return self._serve_cached_payload(
+            key,
+            lambda: self._build_grades_payload(
+                student_card_number,
+                student_group=student_group,
             ),
         )
 
@@ -2048,6 +2441,9 @@ class BackendApp:
 
         if parsed_url.path == "/api/schedule":
             return self._handle_schedule_request(parsed_url)
+
+        if parsed_url.path == "/api/grades":
+            return self._handle_grades_request(parsed_url)
 
         if parsed_url.path in {"/api/search-employee", "/api/employees"}:
             return self._handle_employee_search_request(parsed_url)
