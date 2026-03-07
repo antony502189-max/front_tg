@@ -335,6 +335,18 @@ def build_rating_list_summary(
     if not isinstance(items, list):
         return None
 
+    return _scan_rating_items(items, student_card_number, speciality=speciality).summary
+
+
+def _scan_rating_items(
+    items: list[Any],
+    student_card_number: str,
+    *,
+    speciality: str | None = None,
+) -> RatingCandidateScanResult:
+    faculty_prefixes: set[str] = set()
+    student_card_prefixes: set[str] = set()
+
     normalized_student_card_number = normalize_lookup_value(student_card_number)
     target_index: int | None = None
     target_summary: Mapping[str, Any] | None = None
@@ -345,20 +357,31 @@ def build_rating_list_summary(
             parsed_summaries.append(None)
             continue
 
+        raw_student_card = first_non_empty_string(item.get("studentCardNumber"))
+        normalized_student_card = (
+            "".join(raw_student_card.split()) if raw_student_card is not None else None
+        )
+        if normalized_student_card:
+            if len(normalized_student_card) >= 2:
+                faculty_prefixes.add(normalized_student_card[:2])
+            if len(normalized_student_card) >= 5:
+                student_card_prefixes.add(normalized_student_card[:5])
+
         record_summary = extract_grade_summary_from_record(item)
         parsed_summaries.append(record_summary)
 
-        if (
-            normalize_lookup_value(item.get("studentCardNumber"))
-            != normalized_student_card_number
-        ):
+        if normalize_lookup_value(normalized_student_card) != normalized_student_card_number:
             continue
 
         target_index = index
         target_summary = record_summary or {}
 
     if target_index is None or target_summary is None:
-        return None
+        return RatingCandidateScanResult(
+            summary=None,
+            faculty_prefixes=tuple(sorted(faculty_prefixes)),
+            student_card_prefixes=tuple(sorted(student_card_prefixes)),
+        )
 
     summary: dict[str, Any] = {}
     position = first_finite_number(target_summary.get("position"))
@@ -371,11 +394,17 @@ def build_rating_list_summary(
         else:
             summary["position"] = 1 + sum(
                 1
-                for parsed_summary in parsed_summaries
+                for index, parsed_summary in enumerate(parsed_summaries)
                 if isinstance(parsed_summary, Mapping)
                 and (average := first_finite_number(parsed_summary.get("average")))
                 is not None
-                and average > target_average
+                and (
+                    average > target_average
+                    or (
+                        average == target_average
+                        and index < target_index
+                    )
+                )
             )
 
     resolved_speciality = first_non_empty_string(
@@ -385,7 +414,11 @@ def build_rating_list_summary(
     if resolved_speciality is not None:
         summary["speciality"] = resolved_speciality
 
-    return summary
+    return RatingCandidateScanResult(
+        summary=summary,
+        faculty_prefixes=tuple(sorted(faculty_prefixes)),
+        student_card_prefixes=tuple(sorted(student_card_prefixes)),
+    )
 
 
 class RatingService:
@@ -841,32 +874,17 @@ class RatingService:
             0,
         )
         items = unwrap_value_list(payload) or payload
-        faculty_prefixes: set[str] = set()
-        student_card_prefixes: set[str] = set()
+        if not isinstance(items, list):
+            return RatingCandidateScanResult(
+                summary=None,
+                faculty_prefixes=(),
+                student_card_prefixes=(),
+            )
 
-        if isinstance(items, list):
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
-
-                raw_student_card = first_non_empty_string(item.get("studentCardNumber"))
-                if raw_student_card is None:
-                    continue
-
-                normalized_student_card = "".join(raw_student_card.split())
-                if len(normalized_student_card) >= 2:
-                    faculty_prefixes.add(normalized_student_card[:2])
-                if len(normalized_student_card) >= 5:
-                    student_card_prefixes.add(normalized_student_card[:5])
-
-        return RatingCandidateScanResult(
-            summary=build_rating_list_summary(
-                payload,
-                student_card_number,
-                speciality=candidate.speciality,
-            ),
-            faculty_prefixes=tuple(sorted(faculty_prefixes)),
-            student_card_prefixes=tuple(sorted(student_card_prefixes)),
+        return _scan_rating_items(
+            items,
+            student_card_number,
+            speciality=candidate.speciality,
         )
 
     def _scan_rating_candidates(

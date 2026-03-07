@@ -720,6 +720,27 @@ class BackendServerTests(unittest.TestCase):
             {"position": 5},
         )
 
+    def test_build_rating_list_summary_breaks_average_ties_by_list_order(self) -> None:
+        payload = [
+            {"studentCardNumber": "56141011", "average": 10.0},
+            {"studentCardNumber": "56141016", "average": 10.0},
+            {"studentCardNumber": "56141061", "average": 10.0},
+            {"studentCardNumber": "56140021", "average": 9.75},
+        ]
+
+        self.assertEqual(
+            build_rating_list_summary(payload, "56141011"),
+            {"position": 1},
+        )
+        self.assertEqual(
+            build_rating_list_summary(payload, "56141016"),
+            {"position": 2},
+        )
+        self.assertEqual(
+            build_rating_list_summary(payload, "56141061"),
+            {"position": 3},
+        )
+
     def test_normalize_grades_response_merges_search_and_rating_summary(self) -> None:
         normalized = normalize_grades_response(
             "123456",
