@@ -23,6 +23,7 @@ from backend.server import (
     route_config,
     write_cache,
 )
+from backend.services.rating import build_rating_list_summary
 from backend.user_profiles import UserProfileStore
 
 
@@ -699,6 +700,24 @@ class BackendServerTests(unittest.TestCase):
         self.assertEqual(
             normalized["summary"],
             {"position": 2, "speciality": "CS"},
+        )
+
+    def test_build_rating_list_summary_ranks_by_average_when_payload_is_unsorted(self) -> None:
+        payload = [
+            {"studentCardNumber": "56841001", "average": 8.7},
+            {"studentCardNumber": "56841006", "average": 8.28},
+            {"studentCardNumber": "56841002", "average": 9.0},
+            {"studentCardNumber": "56841003", "average": 8.5},
+            {"studentCardNumber": "56841007", "average": 5.63},
+        ]
+
+        self.assertEqual(
+            build_rating_list_summary(payload, "56841006"),
+            {"position": 4},
+        )
+        self.assertEqual(
+            build_rating_list_summary(payload, "56841007"),
+            {"position": 5},
         )
 
     def test_normalize_grades_response_merges_search_and_rating_summary(self) -> None:

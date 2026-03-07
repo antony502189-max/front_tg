@@ -315,9 +315,17 @@ def build_rating_list_summary(
         return None
 
     normalized_student_card_number = normalize_lookup_value(student_card_number)
+    target_index: int | None = None
+    target_summary: Mapping[str, Any] | None = None
+    parsed_summaries: list[Mapping[str, Any] | None] = []
+
     for index, item in enumerate(items):
         if not isinstance(item, dict):
+            parsed_summaries.append(None)
             continue
+
+        record_summary = extract_grade_summary_from_record(item)
+        parsed_summaries.append(record_summary)
 
         if (
             normalize_lookup_value(item.get("studentCardNumber"))
@@ -325,21 +333,38 @@ def build_rating_list_summary(
         ):
             continue
 
-        record_summary = extract_grade_summary_from_record(item) or {}
-        summary: dict[str, Any] = {}
-        position = first_finite_number(record_summary.get("position"))
-        summary["position"] = int(position) if position is not None else index + 1
+        target_index = index
+        target_summary = record_summary or {}
 
-        resolved_speciality = first_non_empty_string(
-            record_summary.get("speciality"),
-            speciality,
-        )
-        if resolved_speciality is not None:
-            summary["speciality"] = resolved_speciality
+    if target_index is None or target_summary is None:
+        return None
 
-        return summary
+    summary: dict[str, Any] = {}
+    position = first_finite_number(target_summary.get("position"))
+    if position is not None:
+        summary["position"] = int(position)
+    else:
+        target_average = first_finite_number(target_summary.get("average"))
+        if target_average is None:
+            summary["position"] = target_index + 1
+        else:
+            summary["position"] = 1 + sum(
+                1
+                for parsed_summary in parsed_summaries
+                if isinstance(parsed_summary, Mapping)
+                and (average := first_finite_number(parsed_summary.get("average")))
+                is not None
+                and average > target_average
+            )
 
-    return None
+    resolved_speciality = first_non_empty_string(
+        target_summary.get("speciality"),
+        speciality,
+    )
+    if resolved_speciality is not None:
+        summary["speciality"] = resolved_speciality
+
+    return summary
 
 
 class RatingService:

@@ -1166,44 +1166,6 @@ def matches_rating_speciality(text: str, speciality_abbrev: str) -> bool:
     return False
 
 
-def build_rating_list_summary(
-    payload: Any,
-    student_card_number: str,
-    *,
-    speciality: str | None = None,
-) -> dict[str, Any] | None:
-    items = unwrap_value_list(payload) or payload
-    if not isinstance(items, list):
-        return None
-
-    normalized_student_card_number = normalize_lookup_value(student_card_number)
-    for index, item in enumerate(items):
-        if not isinstance(item, dict):
-            continue
-
-        if (
-            normalize_lookup_value(item.get("studentCardNumber"))
-            != normalized_student_card_number
-        ):
-            continue
-
-        record_summary = extract_grade_summary_from_record(item) or {}
-        summary: dict[str, Any] = {}
-        position = first_finite_number(record_summary.get("position"))
-        summary["position"] = int(position) if position is not None else index + 1
-
-        resolved_speciality = first_non_empty_string(
-            record_summary.get("speciality"),
-            speciality,
-        )
-        if resolved_speciality is not None:
-            summary["speciality"] = resolved_speciality
-
-        return summary
-
-    return None
-
-
 def normalize_mark(raw_mark: Any) -> dict[str, Any] | None:
     if isinstance(raw_mark, bool):
         return None
