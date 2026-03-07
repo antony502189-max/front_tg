@@ -816,6 +816,43 @@ class BackendServerTests(unittest.TestCase):
         self.assertEqual(response.payload["subjects"][0]["teacher"], "Иванов И.И.")
         self.assertEqual(len(response.payload["subjects"][0]["marks"]), 2)
 
+    def test_grades_route_retries_search_before_falling_back(self) -> None:
+        search_calls = 0
+
+        def fetcher(path: str, _params: dict[str, str]):
+            nonlocal search_calls
+            if path == "/rating/studentSearch":
+                search_calls += 1
+                if search_calls == 1:
+                    raise UpstreamRequestError("timed out")
+                return {
+                    "studentCardNumber": "123",
+                    "averageMark": 8.4,
+                    "place": 2,
+                }
+
+            if path == "/rating/studentRating":
+                return {
+                    "subjects": [
+                        {
+                            "id": "math",
+                            "subject": "Math",
+                            "marks": [{"value": 9}],
+                        }
+                    ]
+                }
+
+            raise AssertionError(f"Unexpected path: {path}")
+
+        app = BackendApp(config=TEST_CONFIG, fetcher=fetcher)
+
+        response = app.handle_request("GET", "/api/grades?studentCardNumber=123")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(search_calls, 2)
+        self.assertEqual(response.payload["summary"]["average"], 8.4)
+        self.assertEqual(response.payload["summary"]["position"], 2)
+
     def test_grades_route_requests_upstream_sources_in_parallel(self) -> None:
         release = Event()
         seen_paths: list[str] = []
