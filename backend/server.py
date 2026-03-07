@@ -411,6 +411,18 @@ def first_finite_number(*values: Any) -> float | None:
             continue
         if isinstance(value, (int, float)) and math.isfinite(value):
             return float(value)
+        if isinstance(value, str):
+            normalized_value = value.replace(",", ".").strip()
+            if not normalized_value:
+                continue
+
+            try:
+                numeric_value = float(normalized_value)
+            except ValueError:
+                continue
+
+            if math.isfinite(numeric_value):
+                return numeric_value
     return None
 
 
@@ -1125,6 +1137,82 @@ def extract_grade_teacher(raw: Mapping[str, Any]) -> str | None:
     return first_non_empty_field(raw, "teacher", "employee", "fio")
 
 
+def iter_nested_dicts(payload: Any, *, max_depth: int = 5) -> list[dict[str, Any]]:
+    queue: list[tuple[Any, int]] = [(payload, 0)]
+    items: list[dict[str, Any]] = []
+
+    while queue:
+        current, depth = queue.pop(0)
+
+        if isinstance(current, dict):
+            items.append(current)
+            if depth >= max_depth:
+                continue
+            queue.extend((value, depth + 1) for value in current.values())
+            continue
+
+        if isinstance(current, list) and depth < max_depth:
+            queue.extend((value, depth + 1) for value in current)
+
+    return items
+
+
+def extract_grade_summary_from_record(payload: Mapping[str, Any]) -> dict[str, Any] | None:
+    average = first_finite_number(
+        payload.get("average"),
+        payload.get("avgRating"),
+        payload.get("averageMark"),
+        payload.get("avgMark"),
+        payload.get("averageScore"),
+        payload.get("gpa"),
+    )
+    position = first_finite_number(
+        payload.get("position"),
+        payload.get("ratingPlace"),
+        payload.get("place"),
+        payload.get("rank"),
+        payload.get("ratingPosition"),
+    )
+    speciality = first_non_empty_field(
+        payload,
+        "speciality",
+        "specialty",
+        "specialityAbbrev",
+        "specialityName",
+        "specialization",
+        "specializationName",
+        "specAbbrev",
+    )
+
+    if average is None and position is None and speciality is None:
+        return None
+
+    summary: dict[str, Any] = {}
+    if average is not None:
+        summary["average"] = average
+    if position is not None:
+        summary["position"] = int(position)
+    if speciality is not None:
+        summary["speciality"] = speciality
+
+    return summary
+
+
+def is_probable_subject_grade_record(payload: Mapping[str, Any]) -> bool:
+    subject_markers = {
+        "subject",
+        "discipline",
+        "disciplineName",
+        "lessonName",
+        "lessonNameAbbrev",
+        "lessonNameFull",
+        "marks",
+        "grades",
+        "controlPoints",
+    }
+    return any(marker in payload for marker in subject_markers)
+
+
 def unwrap_grade_payload(payload: Any) -> Any:
     current = payload
 
@@ -1251,39 +1339,31 @@ def extract_grade_subjects(payload: Any) -> list[dict[str, Any]]:
 def extract_grade_summary(payload: Any) -> dict[str, Any] | None:
     payload = unwrap_grade_payload(payload)
 
-    if not isinstance(payload, dict):
+    candidates = iter_nested_dicts(payload)
+    if not candidates:
         return None
 
-    average = first_finite_number(
-        payload.get("average"),
-        payload.get("avgRating"),
-        payload.get("averageMark"),
-    )
-    position = first_finite_number(
-        payload.get("position"),
-        payload.get("ratingPlace"),
-        payload.get("place"),
-    )
-    speciality = first_non_empty_field(
-        payload,
-        "speciality",
-        "specialty",
-        "specialityAbbrev",
-        "specialityName",
-    )
+    best_summary: dict[str, Any] | None = None
+    best_score = 0
 
-    if average is None and position is None and speciality is None:
-        return None
+    for index, candidate in enumerate(candidates):
+        summary = extract_grade_summary_from_record(candidate)
+        if summary is None:
+            continue
 
-    summary: dict[str, Any] = {}
-    if average is not None:
-        summary["average"] = average
-    if position is not None:
-        summary["position"] = int(position)
-    if speciality is not None:
-        summary["speciality"] = speciality
+        score = len(summary)
 
-    return summary
+        if score == 1 and index > 0 and is_probable_subject_grade_record(candidate):
+            continue
+
+        if score > best_score:
+            best_summary = summary
+            best_score = score
+
+        if best_score == 3:
+            break
+
+    return best_summary
 
 
 def normalize_grades_response(
