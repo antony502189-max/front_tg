@@ -89,7 +89,7 @@ RUSSIAN_WEEKDAY_TO_INDEX = {
     "Суббота": 5,
 }
 
-GRADES_SEARCH_TIMEOUT_MS = 2_500
+GRADES_SEARCH_TIMEOUT_MS = 4_000
 TIMEOUT_ERROR_MARKERS = (
     "timed out",
     "timeout",
@@ -1527,6 +1527,27 @@ class BackendApp:
             self.config.retry_delay_ms,
         )
 
+    def _request_grades_search(self, student_card_number: str) -> JsonValue:
+        search_path = "/rating/studentSearch"
+        search_params = {"studentCardNumber": student_card_number}
+
+        try:
+            return self.request_upstream_with_timeout(
+                search_path,
+                search_params,
+                timeout_ms=min(self.config.request_timeout_ms, GRADES_SEARCH_TIMEOUT_MS),
+                max_retries=1,
+            )
+        except UpstreamRequestError as error:
+            if error.status is not None:
+                raise
+
+            normalized_message = error.message.lower()
+            if any(marker in normalized_message for marker in TIMEOUT_ERROR_MARKERS):
+                return self.request_upstream(search_path, search_params)
+
+            raise
+
     def _fetch_current_week(self) -> int:
         return normalize_current_week(
             self.request_upstream("/schedule/current-week", {})
@@ -1651,14 +1672,8 @@ class BackendApp:
 
         futures = {
             "search": GRADES_EXECUTOR.submit(
-                self.request_upstream_with_timeout,
-                requests["search"][0],
-                requests["search"][1],
-                timeout_ms=min(
-                    self.config.request_timeout_ms,
-                    GRADES_SEARCH_TIMEOUT_MS,
-                ),
-                max_retries=0,
+                self._request_grades_search,
+                query_value,
             ),
             "rating": GRADES_EXECUTOR.submit(
                 self.request_upstream,
