@@ -660,6 +660,25 @@ class BackendServerTests(unittest.TestCase):
         self.assertEqual(normalized["subjects"][0]["subject"], "Math")
         self.assertEqual(len(normalized["subjects"][0]["marks"]), 2)
 
+    def test_normalize_grades_response_parses_string_summary_values(self) -> None:
+        search_payload = {
+            "studentCardNumber": "123456",
+            "averageMark": "8,4",
+            "place": "12",
+            "specialityAbbrev": "CS",
+        }
+
+        normalized = normalize_grades_response(
+            "123456",
+            search_payload,
+            rating_payload={},
+        )
+
+        self.assertEqual(normalized["summary"]["average"], 8.4)
+        self.assertEqual(normalized["summary"]["position"], 12)
+        self.assertEqual(normalized["summary"]["speciality"], "CS")
+
+
     def test_extract_grade_subjects_handles_wrapped_list_payload(self) -> None:
         payload = {
             "value": [

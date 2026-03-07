@@ -411,6 +411,18 @@ def first_finite_number(*values: Any) -> float | None:
             continue
         if isinstance(value, (int, float)) and math.isfinite(value):
             return float(value)
+        if isinstance(value, str):
+            normalized_value = value.replace(",", ".").strip()
+            if not normalized_value:
+                continue
+
+            try:
+                numeric_value = float(normalized_value)
+            except ValueError:
+                continue
+
+            if math.isfinite(numeric_value):
+                return numeric_value
     return None
 
 
