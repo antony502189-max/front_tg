@@ -26,9 +26,9 @@ const VIEW_OPTIONS: Array<{
   value: ScheduleViewMode
   label: string
 }> = [
-  { value: 'day', label: '????' },
-  { value: 'week', label: '??????' },
-  { value: 'month', label: '?????' },
+  { value: 'day', label: 'День' },
+  { value: 'week', label: 'Неделя' },
+  { value: 'month', label: 'Месяц' },
 ]
 
 const dayFormatter = new Intl.DateTimeFormat('ru-RU', {
@@ -52,10 +52,10 @@ type ScheduleDayView = {
 }
 
 const LESSON_COUNT_LABELS: Record<number, string> = {
-  1: '???????',
-  2: '???????',
-  3: '???????',
-  4: '???????',
+  1: 'пара',
+  2: 'пары',
+  3: 'пары',
+  4: 'пары',
 }
 
 const shiftDateKey = (
@@ -109,10 +109,10 @@ const formatScheduleRange = (
 const getLessonCountLabel = (count: number) => {
   const remainder100 = count % 100
   if (remainder100 >= 11 && remainder100 <= 14) {
-    return '???????'
+    return 'пар'
   }
 
-  return LESSON_COUNT_LABELS[count % 10] ?? '???????'
+  return LESSON_COUNT_LABELS[count % 10] ?? 'пар'
 }
 
 const getLessonStatus = (
@@ -227,7 +227,7 @@ export const SchedulePage = () => {
     getErrorMessage: (requestError) =>
       getApiErrorMessage(
         requestError,
-        '?? ??????? ????????? ??????????. ?????????? ??? ???.',
+        'Не удалось загрузить расписание. Попробуйте ещё раз.',
       ),
   })
 
@@ -253,11 +253,11 @@ export const SchedulePage = () => {
     }
 
     if (role === 'teacher' && !normalizedTeacherUrlId) {
-      return '??????? ???????? ????????????? ? ???????, ????? ????????? ???????????? ??????????.'
+      return 'Укажите профиль преподавателя в настройках, чтобы смотреть персональное расписание.'
     }
 
     if (role !== 'teacher' && !normalizedGroupNumber) {
-      return '???????? ??????? ?????? ? ???????, ????? ????????? ??????????.'
+      return 'Добавьте номер группы в настройках, чтобы загрузить расписание.'
     }
 
     return null
@@ -290,10 +290,10 @@ export const SchedulePage = () => {
   )
   const identityLabel =
     role === 'teacher'
-      ? fullName.trim() || '??????? ?????????????'
+      ? fullName.trim() || 'Профиль преподавателя'
       : normalizedGroupNumber
-        ? `?????? ${normalizedGroupNumber}`
-        : '??????? ????????'
+        ? `Группа ${normalizedGroupNumber}`
+        : 'Группа не указана'
 
   return (
     <div className="planner-page">
@@ -301,18 +301,18 @@ export const SchedulePage = () => {
         <header className="schedule-header schedule-header--modern">
           <div>
             <span className="schedule-kicker">
-              {role === 'teacher' ? '?????????????' : '???????'}
+              {role === 'teacher' ? 'Преподаватель' : 'Студент'}
             </span>
-            <h1 className="planner-title">??????????</h1>
+            <h1 className="planner-title">Расписание</h1>
             <p className="planner-subtitle">
               {role === 'teacher'
-                ? '??????? ???????????? ????? backend ?? urlId ?????????????.'
-                : '??????? ???????????? ????? backend ?? ?????? ??????? ??????.'}
+                ? 'Смотрите расписание через backend по urlId преподавателя.'
+                : 'Смотрите расписание через backend по номеру вашей учебной группы.'}
             </p>
           </div>
 
           <div className="schedule-identity-card">
-            <span className="schedule-identity-label">????????</span>
+            <span className="schedule-identity-label">Профиль</span>
             <strong className="schedule-identity-value">{identityLabel}</strong>
           </div>
         </header>
@@ -354,7 +354,7 @@ export const SchedulePage = () => {
               onClick={() =>
                 setReferenceDate(shiftDateKey(referenceDate, view, -1))
               }
-              aria-label="?????????? ??????"
+              aria-label="Предыдущий период"
             >
               <ChevronLeft size={18} />
             </button>
@@ -362,10 +362,10 @@ export const SchedulePage = () => {
             <div className="schedule-period-copy">
               <span className="schedule-period-label">
                 {view === 'day'
-                  ? '????????? ????'
+                  ? 'Выбранный день'
                   : view === 'week'
-                    ? '??????? ????????'
-                    : '??????? ?????'}
+                    ? 'Текущая неделя'
+                    : 'Текущий месяц'}
               </span>
               <strong className="schedule-period-value">{rangeLabel}</strong>
             </div>
@@ -376,7 +376,7 @@ export const SchedulePage = () => {
               onClick={() =>
                 setReferenceDate(shiftDateKey(referenceDate, view, 1))
               }
-              aria-label="????????? ??????"
+              aria-label="Следующий период"
             >
               <ChevronRight size={18} />
             </button>
@@ -388,7 +388,7 @@ export const SchedulePage = () => {
               className="schedule-today-button"
               onClick={() => setReferenceDate(todayKey)}
             >
-              ???????
+              Сегодня
             </button>
           )}
         </section>
@@ -410,7 +410,7 @@ export const SchedulePage = () => {
                 className="schedule-retry-button"
                 onClick={reload}
               >
-                ????????? ??????
+                Повторить запрос
               </button>
             )}
           </div>
@@ -428,7 +428,7 @@ export const SchedulePage = () => {
                       </h2>
                       <p className="schedule-day-section-subtitle">
                         {day.date === todayKey
-                          ? '???????'
+                          ? 'Сегодня'
                           : `${day.lessons.length} ${getLessonCountLabel(day.lessons.length)}`}
                       </p>
                     </div>
@@ -447,9 +447,9 @@ export const SchedulePage = () => {
               ))
             ) : (
               <div className="schedule-empty-card">
-                <h2 className="schedule-empty-title">?????? ????????</h2>
+                <h2 className="schedule-empty-title">Занятий не найдено</h2>
                 <p className="schedule-empty-subtitle">
-                  ?? ????????? ?????? ??????? ?? ???????.
+                  На выбранный период пар пока нет.
                 </p>
               </div>
             )}

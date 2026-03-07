@@ -53,13 +53,13 @@ export const StudyPage = () => {
     getErrorMessage: (requestError) =>
       getApiErrorMessage(
         requestError,
-        '?? ??????? ????????? ?????? ?? ????????????.',
+        'Не удалось загрузить оценки по успеваемости.',
       ),
   })
 
   const displayMessage = hasStudentCardNumber
     ? error
-    : '???????? ????? ??????? ? ???????, ????? ??????? ????????????.'
+    : 'Укажите номер зачётки в профиле, чтобы видеть успеваемость.'
   const canRenderResults =
     hasStudentCardNumber && hasResolvedCurrentRequest && !error
   const summary = data?.summary
@@ -76,19 +76,19 @@ export const StudyPage = () => {
         <div className="study-inner study-inner--modern">
           <header className="study-header">
             <div>
-              <h1 className="planner-title">?????</h1>
+              <h1 className="planner-title">Учёба</h1>
               <p className="planner-subtitle">
-                ??? ??????? ?????? ???????? ?????? ??? ????????????? ???????.
+                Для преподавателя раздел оценок пока недоступен в текущей версии.
               </p>
             </div>
           </header>
 
           <section className="study-role-card">
-            <h2 className="study-role-title">????? ?????????????</h2>
+            <h2 className="study-role-title">Роль преподавателя</h2>
             <p className="study-role-text">
-              ??? ?????????????? backend ???? ?? ?????? ???? ? ????????. ????
-              ????????????? ?? ???????? ? ???????? ????? ???????, ????? ????????
-              ?????? ?? ??????????? ? ????????.
+              На преподавательском backend пока нет выдачи оценок и зачётки. Как
+              только API появится и станет стабильным, раздел будет показывать
+              данные по успеваемости и рейтингу.
             </p>
           </section>
         </div>
@@ -101,45 +101,45 @@ export const StudyPage = () => {
       <div className="study-inner study-inner--modern">
         <header className="study-header">
           <div>
-            <span className="study-kicker">???????</span>
-            <h1 className="planner-title">?????</h1>
+            <span className="study-kicker">Успеваемость</span>
+            <h1 className="planner-title">Учёба</h1>
             <p className="planner-subtitle">
-              ?????? ? ?????? ??????????? ????? backend ?? ?????? ?????
-              ???????.
+              Следите за баллом успеваемости через backend по номеру вашей
+              зачётки.
             </p>
           </div>
         </header>
 
         <section className="study-student-card">
           <div className="study-student-copy">
-            <span className="study-student-badge">???????</span>
+            <span className="study-student-badge">Студент</span>
             <h2 className="study-student-title">
               {groupNumber.trim()
-                ? `?????? ${groupNumber.trim()}`
-                : '???????????? ???????'}
+                ? `Группа ${groupNumber.trim()}`
+                : 'Не указана группа'}
             </h2>
             <p className="study-student-subtitle">
-              ??????? {normalizedStudentCardNumber || '?? ???????'}
+              Зачётка {normalizedStudentCardNumber || 'не указана'}
             </p>
           </div>
 
           <div className="study-student-metrics">
             <div className="study-metric-card">
-              <span className="study-metric-label">??????? ????</span>
+              <span className="study-metric-label">Средний балл</span>
               <strong className="study-metric-value">
                 {summary?.average?.toFixed(1) ?? '?'}
               </strong>
             </div>
 
             <div className="study-metric-card">
-              <span className="study-metric-label">???????</span>
+              <span className="study-metric-label">Позиция</span>
               <strong className="study-metric-value">
                 {summary?.position ?? '?'}
               </strong>
             </div>
 
             <div className="study-metric-card">
-              <span className="study-metric-label">?????????????</span>
+              <span className="study-metric-label">Специальность</span>
               <strong className="study-metric-value study-metric-value--compact">
                 {summary?.speciality ?? '?'}
               </strong>
@@ -164,7 +164,7 @@ export const StudyPage = () => {
                 className="study-retry-button"
                 onClick={reload}
               >
-                ????????? ??????
+                Повторить запрос
               </button>
             )}
           </div>
@@ -180,7 +180,7 @@ export const StudyPage = () => {
 
             {rating.length > 0 && (
               <section className="study-rating-section">
-                <h2 className="study-section-title">??? ?????????</h2>
+                <h2 className="study-section-title">Топ предметов</h2>
                 <div className="study-rating-row">
                   {rating.map((subject) => (
                     <article
@@ -202,7 +202,7 @@ export const StudyPage = () => {
             )}
 
             <section className="study-subjects-section">
-              <h2 className="study-section-title">?????? ?? ?????????</h2>
+              <h2 className="study-section-title">Оценки по предметам</h2>
 
               {subjects.length > 0 ? (
                 <div className="study-subject-list">
@@ -236,7 +236,7 @@ export const StudyPage = () => {
 
                           <div className="study-subject-summary">
                             <span className="study-subject-summary-label">
-                              ???????
+                              Средний
                             </span>
                             <strong className="study-subject-summary-value">
                               {subjectAverage ?? '?'}
@@ -256,7 +256,7 @@ export const StudyPage = () => {
                             ))
                           ) : (
                             <span className="study-no-marks">
-                              ?????? ???? ???
+                              Оценок пока нет
                             </span>
                           )}
                         </div>
@@ -266,9 +266,9 @@ export const StudyPage = () => {
                 </div>
               ) : (
                 <div className="study-empty-card">
-                  <h2 className="study-empty-title">?????? ???? ???</h2>
+                  <h2 className="study-empty-title">Оценок пока нет</h2>
                   <p className="study-empty-subtitle">
-                    ??? ?????? ?????? ???????? ? IIS, ??? ??????????? ?????.
+                    Как только данные появятся в IIS, они отобразятся здесь.
                   </p>
                 </div>
               )}
