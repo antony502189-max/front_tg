@@ -5,8 +5,8 @@ import {
 } from 'react'
 
 export const GROUP_LENGTH = 6
-export const STUDENT_CARD_MIN_LENGTH = 4
-export const STUDENT_CARD_MAX_LENGTH = 32
+export const STUDENT_CARD_MIN_LENGTH = 8
+export const STUDENT_CARD_MAX_LENGTH = 8
 
 type StudentProfilePayload = {
   groupNumber: string
@@ -55,7 +55,9 @@ export const useStudentProfileForm = ({
 
   const updateStudentCardNumber = useCallback((value: string) => {
     setStudentCardNumber(
-      value.slice(0, STUDENT_CARD_MAX_LENGTH),
+      value
+        .replace(/\D/g, '')
+        .slice(0, STUDENT_CARD_MAX_LENGTH),
     )
   }, [])
 

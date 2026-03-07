@@ -8,7 +8,7 @@ export type {
   SubjectGrades,
 } from '../types/grades'
 
-const GRADES_API_TIMEOUT_MS = LONG_API_TIMEOUT_MS * 2
+const GRADES_API_TIMEOUT_MS = LONG_API_TIMEOUT_MS * 3
 
 const toNumber = (value: unknown): number | undefined => {
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -114,21 +114,23 @@ export async function fetchGrades(
   } = {},
 ): Promise<GradesResponse> {
   const { groupNumber, signal } = options
+  const normalizedStudentCardNumber = studentCardNumber.trim()
   const normalizedGroupNumber = groupNumber?.trim()
-  const params: Record<string, string> = {
-    studentCardNumber: studentCardNumber.trim(),
-  }
+  const params: Record<string, string> = {}
 
   if (normalizedGroupNumber) {
     params.studentGroup = normalizedGroupNumber
   }
 
-  const payload = await apiGet<GradesResponse & Record<string, unknown>>('/grades', {
-    params,
-    timeout: GRADES_API_TIMEOUT_MS,
-    signal,
-    cacheTtlMs: 60_000,
-  })
+  const payload = await apiGet<GradesResponse & Record<string, unknown>>(
+    `/rating/${encodeURIComponent(normalizedStudentCardNumber)}`,
+    {
+      params,
+      timeout: GRADES_API_TIMEOUT_MS,
+      signal,
+      cacheTtlMs: 60_000,
+    },
+  )
 
   return {
     ...payload,

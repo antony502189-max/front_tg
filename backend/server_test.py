@@ -960,6 +960,157 @@ class BackendServerTests(unittest.TestCase):
         self.assertEqual(response.payload["summary"]["speciality"], "CS")
         self.assertEqual(response.payload["subjects"][0]["subject"], "Math")
 
+    def test_rating_route_returns_frontend_contract(self) -> None:
+        def fetcher(path: str, params: dict[str, str]):
+            if path == "/rating/studentSearch":
+                return {"studentCardNumber": "56841006", "average": 8.4}
+
+            if path == "/rating/studentRating":
+                return {
+                    "subjects": [
+                        {
+                            "id": "math",
+                            "subject": "Math",
+                            "marks": [{"value": 9}],
+                        }
+                    ]
+                }
+
+            if path == "/student-groups/filters":
+                self.assertEqual(params, {"name": "353502"})
+                return [
+                    {
+                        "id": 1,
+                        "name": "353502",
+                        "specialityAbbrev": "CS",
+                    }
+                ]
+
+            if path == "/schedule/faculties":
+                return [{"id": 20040, "text": "Faculty"}]
+
+            if path == "/rating/specialities":
+                self.assertEqual(params, {"facultyId": "20040"})
+                return [
+                    {
+                        "id": 20655,
+                        "text": "(6-05-0611-06) CS (1 СЃС‚СѓРїРµРЅСЊ РґРЅРµРІРЅР°СЏ)",
+                    }
+                ]
+
+            if path == "/rating/courses":
+                self.assertEqual(
+                    params,
+                    {"facultyId": "20040", "specialityId": "20655"},
+                )
+                return [{"course": 3, "hasForeignPlan": False}]
+
+            if path == "/rating":
+                self.assertEqual(params, {"sdef": "20655", "course": "3"})
+                return [
+                    {"studentCardNumber": "11111111", "average": 9.1},
+                    {"studentCardNumber": "56841006", "average": 8.4},
+                ]
+
+            raise AssertionError(f"Unexpected path: {path}")
+
+        app = BackendApp(config=TEST_CONFIG, fetcher=fetcher)
+
+        response = app.handle_request(
+            "GET",
+            "/api/rating/56841006?studentGroup=353502",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.payload["summary"]["average"], 8.4)
+        self.assertEqual(response.payload["summary"]["position"], 2)
+        self.assertEqual(response.payload["summary"]["speciality"], "CS")
+        self.assertEqual(response.payload["subjects"][0]["subject"], "Math")
+
+    def test_rating_route_rejects_non_digit_student_card(self) -> None:
+        app = BackendApp(config=TEST_CONFIG, fetcher=lambda *_: {})
+
+        response = app.handle_request("GET", "/api/rating/56A84106")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("studentCard", response.payload["error"])
+
+    def test_rating_route_falls_back_to_related_speciality_code(self) -> None:
+        search_calls = 0
+
+        def fetcher(path: str, params: dict[str, str]):
+            nonlocal search_calls
+
+            if path == "/rating/studentSearch":
+                search_calls += 1
+                return {"studentCardNumber": "56841006", "average": 8.28}
+
+            if path == "/rating/studentRating":
+                return {
+                    "subjects": [
+                        {
+                            "id": "math",
+                            "subject": "Math",
+                            "marks": [{"value": 9}],
+                        }
+                    ]
+                }
+
+            if path == "/student-groups/filters":
+                self.assertEqual(params, {"name": "151051"})
+                return [
+                    {
+                        "id": 1,
+                        "name": "151051",
+                        "specialityAbbrev": "ПОИТ",
+                    }
+                ]
+
+            if path == "/schedule/faculties":
+                return [{"id": 20040, "text": "ФИБ"}]
+
+            if path == "/rating/specialities":
+                self.assertEqual(params, {"facultyId": "20040"})
+                return [
+                    {
+                        "id": 20850,
+                        "text": "(6-05-0611-06) СиСИ (ПОИ) (1 ступень дневная)",
+                    },
+                    {
+                        "id": 20655,
+                        "text": "(6-05-0611-06) СиСИ (1 ступень дневная)",
+                    },
+                ]
+
+            if path == "/rating/courses":
+                if params == {"facultyId": "20040", "specialityId": "20850"}:
+                    return [{"course": 2, "hasForeignPlan": False}]
+                if params == {"facultyId": "20040", "specialityId": "20655"}:
+                    return [{"course": 1, "hasForeignPlan": False}]
+
+            if path == "/rating":
+                self.assertEqual(params, {"sdef": "20655", "course": "1"})
+                return [
+                    {"studentCardNumber": "56841001", "average": 9.1},
+                    {"studentCardNumber": "56841006", "average": 8.47},
+                ]
+
+            raise AssertionError(f"Unexpected path: {path} {params}")
+
+        app = BackendApp(config=TEST_CONFIG, fetcher=fetcher)
+
+        response = app.handle_request(
+            "GET",
+            "/api/rating/56841006?studentGroup=151051",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.payload["summary"]["average"], 8.47)
+        self.assertEqual(response.payload["summary"]["position"], 2)
+        self.assertEqual(response.payload["summary"]["speciality"], "ПОИТ")
+        self.assertEqual(response.payload["subjects"][0]["subject"], "Math")
+        self.assertEqual(search_calls, 0)
+
     def test_grades_route_requests_upstream_sources_in_parallel(self) -> None:
         release = Event()
         seen_paths: list[str] = []

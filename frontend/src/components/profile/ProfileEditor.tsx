@@ -338,7 +338,7 @@ export const ProfileEditor = ({
               </label>
               <input
                 id="profile-card"
-                inputMode="text"
+                inputMode="numeric"
                 autoComplete="off"
                 className={`onboarding-input${
                   touched.card && !isCardValid
@@ -349,10 +349,9 @@ export const ProfileEditor = ({
                 value={studentCardNumber}
                 onChange={(event) =>
                   setStudentCardNumber(
-                    event.target.value.slice(
-                      0,
-                      STUDENT_CARD_MAX_LENGTH,
-                    ),
+                    event.target.value
+                      .replace(/\D/g, '')
+                      .slice(0, STUDENT_CARD_MAX_LENGTH),
                   )
                 }
                 onBlur={() =>
