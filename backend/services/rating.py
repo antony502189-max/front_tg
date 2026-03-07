@@ -254,32 +254,28 @@ def build_rating_list_summary(
     if not isinstance(items, list):
         return None
 
-    normalized_items = [item for item in items if isinstance(item, dict)]
-    normalized_items.sort(
-        key=lambda item: first_finite_number(
-            item.get("average"),
-            item.get("averageMark"),
-            item.get("avgRating"),
-            item.get("averageScore"),
-            item.get("gpa"),
-        )
-        or float("-inf"),
-        reverse=True,
-    )
-
     normalized_student_card_number = normalize_lookup_value(student_card_number)
-    for index, item in enumerate(normalized_items):
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            continue
+
         if (
             normalize_lookup_value(item.get("studentCardNumber"))
             != normalized_student_card_number
         ):
             continue
 
-        summary = extract_grade_summary_from_record(item) or {}
-        summary["position"] = index + 1
+        record_summary = extract_grade_summary_from_record(item) or {}
+        summary: dict[str, Any] = {}
+        position = first_finite_number(record_summary.get("position"))
+        summary["position"] = int(position) if position is not None else index + 1
 
-        if speciality is not None and "speciality" not in summary:
-            summary["speciality"] = speciality
+        resolved_speciality = first_non_empty_string(
+            record_summary.get("speciality"),
+            speciality,
+        )
+        if resolved_speciality is not None:
+            summary["speciality"] = resolved_speciality
 
         return summary
 

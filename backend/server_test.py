@@ -653,9 +653,10 @@ class BackendServerTests(unittest.TestCase):
             "123456",
             search_payload,
             rating_payload,
+            extra_summary={"position": 12, "speciality": "CS"},
         )
 
-        self.assertEqual(normalized["summary"]["average"], 8.4)
+        self.assertEqual(normalized["summary"]["average"], 8.5)
         self.assertEqual(normalized["summary"]["position"], 12)
         self.assertEqual(normalized["summary"]["speciality"], "CS")
         self.assertEqual(normalized["subjects"][0]["subject"], "Math")
@@ -664,18 +665,26 @@ class BackendServerTests(unittest.TestCase):
     def test_normalize_grades_response_parses_string_summary_values(self) -> None:
         search_payload = {
             "studentCardNumber": "123456",
-            "averageMark": "8,4",
-            "place": "12",
             "specialityAbbrev": "CS",
+        }
+        rating_payload = {
+            "subjects": [
+                {
+                    "id": "math",
+                    "subject": "Math",
+                    "marks": ["8", "9"],
+                }
+            ]
         }
 
         normalized = normalize_grades_response(
             "123456",
             search_payload,
-            rating_payload={},
+            rating_payload=rating_payload,
+            extra_summary={"position": "12"},
         )
 
-        self.assertEqual(normalized["summary"]["average"], 8.4)
+        self.assertEqual(normalized["summary"]["average"], 8.5)
         self.assertEqual(normalized["summary"]["position"], 12)
         self.assertEqual(normalized["summary"]["speciality"], "CS")
 
@@ -689,7 +698,7 @@ class BackendServerTests(unittest.TestCase):
 
         self.assertEqual(
             normalized["summary"],
-            {"average": 8.4, "position": 2, "speciality": "CS"},
+            {"position": 2, "speciality": "CS"},
         )
 
     def test_normalize_grades_response_merges_search_and_rating_summary(self) -> None:
@@ -701,7 +710,7 @@ class BackendServerTests(unittest.TestCase):
 
         self.assertEqual(
             normalized["summary"],
-            {"average": 8.4, "position": 2, "speciality": "CS"},
+            {"speciality": "CS"},
         )
 
     def test_matches_rating_speciality_accepts_track_suffix(self) -> None:
@@ -757,6 +766,45 @@ class BackendServerTests(unittest.TestCase):
         )
 
         self.assertIsNone(normalized["summary"])
+    def test_extract_grade_summary_handles_wrapped_rating_payload(self) -> None:
+        rating_payload = {
+            "value": [
+                {
+                    "studentCardNumber": "123456",
+                    "avgRating": "8,9",
+                    "ratingPlace": "5",
+                    "specialityName": "ПОИТ",
+                }
+            ]
+        }
+
+        normalized = normalize_grades_response(
+            "123456",
+            search_payload=None,
+            rating_payload=rating_payload,
+        )
+
+        self.assertEqual(normalized["summary"], {"speciality": "ПОИТ"})
+
+    def test_extract_grade_summary_ignores_subject_average_as_summary(self) -> None:
+        rating_payload = {
+            "subjects": [
+                {
+                    "disciplineName": "Математика",
+                    "averageMark": 9,
+                    "marks": [9, 10],
+                }
+            ]
+        }
+
+        normalized = normalize_grades_response(
+            "123456",
+            search_payload=None,
+            rating_payload=rating_payload,
+        )
+
+        self.assertEqual(normalized["summary"], {"average": 9.5})
+
     def test_extract_grade_subjects_handles_wrapped_list_payload(self) -> None:
         payload = {
             "value": [
@@ -889,8 +937,8 @@ class BackendServerTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(search_calls, 2)
-        self.assertEqual(response.payload["summary"]["average"], 8.4)
-        self.assertEqual(response.payload["summary"]["position"], 2)
+        self.assertEqual(response.payload["summary"]["average"], 9.0)
+        self.assertNotIn("position", response.payload["summary"])
 
     def test_grades_route_computes_position_from_group_rating(self) -> None:
         def fetcher(path: str, params: dict[str, str]):
@@ -955,7 +1003,7 @@ class BackendServerTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.payload["summary"]["average"], 8.4)
+        self.assertEqual(response.payload["summary"]["average"], 9.0)
         self.assertEqual(response.payload["summary"]["position"], 2)
         self.assertEqual(response.payload["summary"]["speciality"], "CS")
         self.assertEqual(response.payload["subjects"][0]["subject"], "Math")
@@ -1022,7 +1070,7 @@ class BackendServerTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.payload["summary"]["average"], 8.4)
+        self.assertEqual(response.payload["summary"]["average"], 9.0)
         self.assertEqual(response.payload["summary"]["position"], 2)
         self.assertEqual(response.payload["summary"]["speciality"], "CS")
         self.assertEqual(response.payload["subjects"][0]["subject"], "Math")
@@ -1105,7 +1153,7 @@ class BackendServerTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.payload["summary"]["average"], 8.47)
+        self.assertEqual(response.payload["summary"]["average"], 9.0)
         self.assertEqual(response.payload["summary"]["position"], 2)
         self.assertEqual(response.payload["summary"]["speciality"], "ПОИТ")
         self.assertEqual(response.payload["subjects"][0]["subject"], "Math")
@@ -1186,7 +1234,7 @@ class BackendServerTests(unittest.TestCase):
         response = app.handle_request("GET", "/api/grades?studentCardNumber=56841006")
 
         self.assertEqual(response.status_code, 200)
-        self.assertIsNone(response.payload["summary"])
+        self.assertEqual(response.payload["summary"], {"average": 9.0})
         self.assertEqual(len(response.payload["subjects"]), 1)
         self.assertEqual(response.payload["subjects"][0]["subject"], "МА")
         self.assertEqual(

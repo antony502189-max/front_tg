@@ -1174,32 +1174,28 @@ def build_rating_list_summary(
     if not isinstance(items, list):
         return None
 
-    normalized_items = [item for item in items if isinstance(item, dict)]
-    normalized_items.sort(
-        key=lambda item: first_finite_number(
-            item.get("average"),
-            item.get("averageMark"),
-            item.get("avgRating"),
-            item.get("averageScore"),
-            item.get("gpa"),
-        )
-        or float("-inf"),
-        reverse=True,
-    )
-
     normalized_student_card_number = normalize_lookup_value(student_card_number)
-    for index, item in enumerate(normalized_items):
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            continue
+
         if (
             normalize_lookup_value(item.get("studentCardNumber"))
             != normalized_student_card_number
         ):
             continue
 
-        summary = extract_grade_summary_from_record(item) or {}
-        summary["position"] = index + 1
+        record_summary = extract_grade_summary_from_record(item) or {}
+        summary: dict[str, Any] = {}
+        position = first_finite_number(record_summary.get("position"))
+        summary["position"] = int(position) if position is not None else index + 1
 
-        if speciality is not None and "speciality" not in summary:
-            summary["speciality"] = speciality
+        resolved_speciality = first_non_empty_string(
+            record_summary.get("speciality"),
+            speciality,
+        )
+        if resolved_speciality is not None:
+            summary["speciality"] = resolved_speciality
 
         return summary
 
@@ -1496,6 +1492,34 @@ def extract_grade_subjects(payload: Any) -> list[dict[str, Any]]:
     return subjects
 
 
+def calculate_subject_marks_average(subjects: list[Mapping[str, Any]]) -> float | None:
+    marks_total = 0.0
+    marks_count = 0
+
+    for subject in subjects:
+        marks = subject.get("marks")
+        if not isinstance(marks, list):
+            continue
+
+        for mark in marks:
+            numeric_value = None
+            if isinstance(mark, Mapping):
+                numeric_value = first_finite_number(mark.get("value"))
+            else:
+                numeric_value = first_finite_number(mark)
+
+            if numeric_value is None:
+                continue
+
+            marks_total += numeric_value
+            marks_count += 1
+
+    if marks_count == 0:
+        return None
+
+    return marks_total / marks_count
+
+
 def extract_grade_summary(payload: Any) -> dict[str, Any] | None:
     payload = unwrap_grade_payload(payload)
 
@@ -1534,12 +1558,30 @@ def normalize_grades_response(
     warning: str | None = None,
 ) -> dict[str, Any]:
     matched_student = find_student_card_match(search_payload, student_card_number)
-    summary = merge_grade_summaries(
-        extract_grade_summary(matched_student),
-        extract_grade_summary(rating_payload),
-        extra_summary,
-    )
     subjects = extract_grade_subjects(rating_payload)
+    search_summary = extract_grade_summary(matched_student)
+    rating_summary = extract_grade_summary(rating_payload)
+    average = calculate_subject_marks_average(subjects)
+    position = (
+        first_finite_number(extra_summary.get("position"))
+        if isinstance(extra_summary, Mapping)
+        else None
+    )
+    speciality = first_non_empty_string(
+        extra_summary.get("speciality") if isinstance(extra_summary, Mapping) else None,
+        rating_summary.get("speciality") if rating_summary is not None else None,
+        search_summary.get("speciality") if search_summary is not None else None,
+    )
+
+    summary = None
+    if average is not None or position is not None or speciality is not None:
+        summary = {}
+        if average is not None:
+            summary["average"] = average
+        if position is not None:
+            summary["position"] = int(position)
+        if speciality is not None:
+            summary["speciality"] = speciality
 
     response = {
         "summary": summary,
@@ -1869,7 +1911,7 @@ class BackendApp:
                 else:
                     extra_summary = result
 
-            if extra_summary is None or "average" not in extra_summary:
+            if rating_payload is None:
                 try:
                     search_payload = self._request_grades_search(query_value)
                 except UpstreamRequestError as error:
