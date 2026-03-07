@@ -717,7 +717,6 @@ class BackendServerTests(unittest.TestCase):
         )
 
         self.assertIsNone(normalized["summary"])
-
     def test_extract_grade_subjects_handles_wrapped_list_payload(self) -> None:
         payload = {
             "value": [
