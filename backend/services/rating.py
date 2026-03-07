@@ -261,6 +261,27 @@ def matches_rating_speciality(text: str, speciality_abbrev: str) -> bool:
     return False
 
 
+def resolve_speciality_name(
+    preferred_speciality: str | None,
+    resolved_speciality: str | None,
+) -> str | None:
+    preferred = first_non_empty_string(preferred_speciality)
+    resolved = first_non_empty_string(resolved_speciality)
+
+    if preferred is None:
+        return resolved
+
+    if resolved is None:
+        return preferred
+
+    normalized_preferred = normalize_lookup_value(preferred)
+    normalized_resolved = normalize_lookup_value(resolved)
+    if normalized_resolved.startswith(f"{normalized_preferred}("):
+        return resolved
+
+    return preferred
+
+
 def extract_grade_summary_from_record(
     payload: Mapping[str, Any],
 ) -> dict[str, Any] | None:
@@ -724,7 +745,10 @@ class RatingService:
         summary = self._scan_rating_candidates(student_card_number, rating_candidates)
         if summary is not None:
             summary = dict(summary)
-            summary["speciality"] = speciality_abbrev
+            summary["speciality"] = resolve_speciality_name(
+                speciality_abbrev,
+                first_non_empty_string(summary.get("speciality")),
+            )
             return summary
 
         return fallback_summary
@@ -753,7 +777,10 @@ class RatingService:
             return card_summary
 
         merged_summary = dict(card_summary)
-        speciality = first_non_empty_string(group_summary.get("speciality"))
+        speciality = resolve_speciality_name(
+            first_non_empty_string(group_summary.get("speciality")),
+            first_non_empty_string(card_summary.get("speciality")),
+        )
         if speciality is not None:
             merged_summary["speciality"] = speciality
 
@@ -1041,4 +1068,5 @@ __all__ = [
     "infer_course_from_group",
     "matches_rating_speciality",
     "normalize_course_values",
+    "resolve_speciality_name",
 ]

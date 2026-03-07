@@ -20,6 +20,8 @@ try:
     from backend.services.rating import (
         RatingService,
         StudentRatingFetchResult,
+        extract_rating_speciality_name,
+        matches_rating_speciality,
     )
     from backend.telegram_bot import (
         TelegramBotApp,
@@ -39,6 +41,8 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for direct script lau
     from services.rating import (  # type: ignore
         RatingService,
         StudentRatingFetchResult,
+        extract_rating_speciality_name,
+        matches_rating_speciality,
     )
     from telegram_bot import (  # type: ignore
         TelegramBotApp,
@@ -1112,58 +1116,6 @@ def normalize_course_values(payload: Any) -> list[int]:
             normalized_courses.append(course_value)
 
     return normalized_courses
-
-
-def extract_rating_speciality_name(text: str | None) -> str | None:
-    if not isinstance(text, str):
-        return None
-
-    normalized_text = text.strip()
-    if not normalized_text:
-        return None
-
-    match = re.match(
-        r"^\([^)]+\)\s*(.+?)\s+\(\d+\s+ступень",
-        normalized_text,
-        flags=re.IGNORECASE,
-    )
-    if match is not None:
-        return match.group(1).strip() or None
-
-    return normalized_text
-
-
-def matches_rating_speciality(text: str, speciality_abbrev: str) -> bool:
-    normalized_abbrev = normalize_lookup_value(speciality_abbrev)
-    if not normalized_abbrev:
-        return False
-
-    candidates = [
-        extract_rating_speciality_name(text),
-        re.sub(r"^\([^)]+\)\s*", "", text).strip() if isinstance(text, str) else "",
-        text,
-    ]
-
-    for candidate in candidates:
-        normalized_text = normalize_lookup_value(candidate)
-        if not normalized_text:
-            continue
-        if normalized_text == normalized_abbrev:
-            return True
-        if normalized_text.startswith(f"{normalized_abbrev}("):
-            return True
-
-    track_tokens = re.findall(r"\(([^)]+)\)", re.sub(r"^\([^)]+\)\s*", "", text))
-    for token in track_tokens:
-        normalized_token = normalize_lookup_value(token)
-        if len(normalized_token) < 3:
-            continue
-        if normalized_token.startswith(normalized_abbrev):
-            return True
-        if normalized_abbrev.startswith(normalized_token):
-            return True
-
-    return False
 
 
 def normalize_mark(raw_mark: Any) -> dict[str, Any] | None:
