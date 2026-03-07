@@ -107,7 +107,6 @@ export const StudyPage = () => {
       <div className="study-inner study-inner--modern">
         <header className="study-header">
           <div>
-            <span className="study-kicker">Успеваемость</span>
             <h1 className="planner-title">Учёба</h1>
             <p className="planner-subtitle">
               Следите за баллом успеваемости через backend по номеру вашей

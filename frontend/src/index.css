@@ -2334,3 +2334,501 @@ body {
     align-items: flex-start;
   }
 }
+
+/* Simplified surface refresh */
+:root {
+  --app-page-bg: #0f1a27;
+  --app-page-bg-alt: #132234;
+  --app-card-bg: #18283a;
+  --app-card-bg-strong: #213347;
+  --app-card-bg-muted: #142234;
+  --app-card-border: rgba(173, 190, 209, 0.12);
+  --app-card-border-strong: rgba(108, 178, 255, 0.28);
+  --app-text-strong: #f3f7fb;
+  --app-text: #d9e3ef;
+  --app-text-muted: #8ea3ba;
+  --app-accent: #72b5ff;
+  --app-accent-soft: rgba(114, 181, 255, 0.16);
+  --app-success: #69cf8f;
+  --app-success-soft: rgba(105, 207, 143, 0.16);
+  --app-warning: #f1c76f;
+  --app-warning-soft: rgba(241, 199, 111, 0.18);
+  --app-danger: #ff8d86;
+  --app-danger-soft: rgba(255, 141, 134, 0.16);
+  --app-shadow: none;
+  --app-shadow-soft: none;
+}
+
+body {
+  background: linear-gradient(
+    180deg,
+    var(--app-page-bg) 0%,
+    var(--app-page-bg-alt) 100%
+  );
+  color: var(--app-text);
+}
+
+.app-root {
+  background: none;
+}
+
+.main-layout-shell {
+  gap: 10px;
+}
+
+.planner-title,
+.profile-editor-title,
+.settings-section-title,
+.study-role-title,
+.study-student-title,
+.study-section-title,
+.study-subject-title,
+.schedule-section-title,
+.schedule-identity-value,
+.schedule-period-value,
+.univer-identity-value,
+.univer-room-title,
+.univer-teacher-name,
+.free-room-title,
+.planner-task-title,
+.planner-empty-title,
+.study-empty-title,
+.schedule-empty-title,
+.univer-helper-title,
+.study-metric-value,
+.study-subject-summary-value {
+  color: var(--app-text-strong);
+}
+
+.planner-subtitle,
+.profile-editor-subtitle,
+.settings-section-text,
+.study-student-subtitle,
+.study-role-text,
+.study-rating-meta,
+.study-subject-teacher,
+.study-no-marks,
+.study-empty-subtitle,
+.study-error-text,
+.schedule-day-section-subtitle,
+.schedule-empty-subtitle,
+.schedule-error-text,
+.univer-helper-subtitle,
+.univer-error-text,
+.univer-room-subtitle,
+.univer-room-text,
+.univer-teacher-text,
+.univer-search-hint,
+.free-room-subtitle,
+.free-room-note,
+.planner-empty-subtitle,
+.planner-task-description,
+.profile-role-description,
+.profile-selected-teacher-content span,
+.profile-teacher-option-content span {
+  color: var(--app-text-muted);
+}
+
+.main-layout-panel,
+.planner-page,
+.planner-inner,
+.study-inner,
+.schedule-inner,
+.settings-inner,
+.univer-inner {
+  color: var(--app-text);
+}
+
+.bottom-nav {
+  padding: 8px;
+  border-radius: 18px;
+  border: 1px solid var(--app-card-border);
+  background: var(--app-card-bg);
+  box-shadow: none;
+}
+
+.bottom-nav-item {
+  border-radius: 12px;
+  color: var(--app-text-muted);
+}
+
+.bottom-nav-item--active {
+  background: var(--app-accent-soft);
+  color: var(--app-text-strong);
+}
+
+.onboarding-card,
+.profile-editor-card,
+.settings-section,
+.schedule-identity-card,
+.univer-identity-card,
+.study-role-card,
+.study-student-card,
+.schedule-day-section,
+.study-metric-card,
+.study-rating-card,
+.study-subject-card,
+.univer-teacher-card,
+.univer-room-card,
+.free-room-card,
+.univer-helper-card,
+.univer-empty-card,
+.univer-error-card,
+.schedule-empty-card,
+.schedule-error-card,
+.study-empty-card,
+.study-error-card,
+.planner-task-card,
+.planner-empty-card,
+.univer-search-section,
+.schedule-period-bar,
+.profile-selected-teacher,
+.profile-teacher-option {
+  border: 1px solid var(--app-card-border);
+  background: var(--app-card-bg);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.profile-editor-card,
+.settings-section,
+.schedule-identity-card,
+.univer-identity-card,
+.study-role-card,
+.study-student-card,
+.schedule-day-section,
+.study-subject-card,
+.univer-teacher-card,
+.univer-room-card,
+.free-room-card,
+.univer-helper-card,
+.univer-empty-card,
+.univer-error-card,
+.schedule-empty-card,
+.schedule-error-card,
+.study-empty-card,
+.study-error-card,
+.planner-task-card,
+.planner-empty-card {
+  border-radius: 20px;
+}
+
+.schedule-header--modern,
+.univer-header {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.schedule-identity-card,
+.univer-identity-card {
+  min-width: 0;
+  padding: 16px 18px;
+}
+
+.schedule-identity-label,
+.univer-identity-label,
+.schedule-period-label,
+.study-metric-label,
+.study-subject-summary-label,
+.free-room-next-label,
+.planner-task-pill,
+.schedule-lesson-text,
+.univer-room-slot-date,
+.univer-room-slot-time {
+  color: var(--app-text-muted);
+}
+
+.onboarding-kicker,
+.schedule-kicker,
+.study-kicker,
+.univer-kicker,
+.study-student-badge {
+  background: var(--app-accent-soft);
+  color: var(--app-accent);
+}
+
+.planner-filter-chip,
+.schedule-view-chip,
+.schedule-today-button,
+.schedule-period-button,
+.univer-mode-tab,
+.settings-subgroup-button,
+.planner-task-pill,
+.schedule-lesson-pill,
+.univer-teacher-pill,
+.free-room-tag,
+.study-subject-summary,
+.univer-room-slot,
+.profile-role-card,
+.profile-selected-teacher,
+.profile-teacher-option,
+.settings-subgroup-toggle,
+.univer-search-input-wrapper,
+.study-metric-card,
+.study-rating-card {
+  border: 1px solid var(--app-card-border);
+  background: var(--app-card-bg-strong);
+  box-shadow: none;
+  color: var(--app-text);
+}
+
+.planner-filter-chip,
+.schedule-view-chip,
+.schedule-today-button,
+.schedule-period-button,
+.univer-mode-tab,
+.settings-subgroup-button {
+  color: var(--app-text);
+}
+
+.planner-filter-chip--active,
+.schedule-view-chip--active,
+.univer-mode-tab--active,
+.settings-subgroup-button--active,
+.profile-role-card--active,
+.profile-teacher-option--selected {
+  border-color: var(--app-card-border-strong);
+  background: var(--app-accent-soft);
+  color: var(--app-text-strong);
+  box-shadow: none;
+  transform: none;
+}
+
+.profile-role-card--active .profile-role-description {
+  color: var(--app-text);
+}
+
+.onboarding-input,
+.univer-search-input {
+  border: 1px solid var(--app-card-border);
+  background: var(--app-card-bg-muted);
+  color: var(--app-text-strong);
+}
+
+.onboarding-input::placeholder,
+.univer-search-input::placeholder {
+  color: var(--app-text-muted);
+}
+
+.onboarding-input:focus,
+.univer-search-input:focus {
+  border-color: var(--app-card-border-strong);
+  box-shadow: none;
+}
+
+.univer-search-icon,
+.profile-search-icon {
+  color: var(--app-text-muted);
+}
+
+.study-student-card {
+  background: var(--app-card-bg);
+}
+
+.study-student-title,
+.study-role-title {
+  margin-top: 8px;
+}
+
+.study-metric-value,
+.study-subject-summary-value,
+.study-rating-score {
+  color: var(--app-text-strong);
+}
+
+.study-rating-score {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--app-accent-soft);
+  color: var(--app-accent);
+}
+
+.study-mark-badge {
+  border: 1px solid transparent;
+}
+
+.study-mark-badge--success {
+  background: var(--app-success-soft);
+  color: var(--app-success);
+}
+
+.study-mark-badge--warning {
+  background: var(--app-warning-soft);
+  color: var(--app-warning);
+}
+
+.study-mark-badge--danger {
+  background: var(--app-danger-soft);
+  color: var(--app-danger);
+}
+
+.schedule-period-bar {
+  padding: 8px;
+}
+
+.schedule-lesson-card {
+  border: 1px solid var(--app-card-border);
+  background: var(--app-card-bg-strong);
+  box-shadow: none;
+}
+
+.schedule-lesson-card--past {
+  background: var(--app-card-bg-muted);
+  color: var(--app-text-muted);
+}
+
+.schedule-lesson-card--current {
+  border-color: var(--app-card-border-strong);
+}
+
+.schedule-lesson-title,
+.schedule-lesson-pill,
+.univer-room-slot-subject {
+  color: var(--app-text-strong);
+}
+
+.schedule-lesson-state-pill {
+  background: var(--app-success-soft);
+  color: var(--app-success);
+}
+
+.schedule-lesson-kind--lecture,
+.schedule-lesson-accent--lecture {
+  background: var(--app-success-soft);
+  color: var(--app-success);
+}
+
+.schedule-lesson-kind--practice,
+.schedule-lesson-accent--practice {
+  background: var(--app-warning-soft);
+  color: var(--app-warning);
+}
+
+.schedule-lesson-kind--lab,
+.schedule-lesson-accent--lab {
+  background: var(--app-danger-soft);
+  color: var(--app-danger);
+}
+
+.schedule-lesson-kind--other,
+.schedule-lesson-accent--other {
+  background: var(--app-accent-soft);
+  color: var(--app-accent);
+}
+
+.schedule-lesson-accent--muted {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.univer-teacher-avatar,
+.profile-selected-teacher-avatar,
+.profile-teacher-option-avatar {
+  background: var(--app-card-bg-muted);
+}
+
+.univer-teacher-initials {
+  color: var(--app-text-strong);
+}
+
+.univer-room-status,
+.free-room-status {
+  font-weight: 700;
+}
+
+.univer-room-status--free,
+.free-room-status {
+  background: var(--app-success-soft);
+  color: var(--app-success);
+}
+
+.univer-room-status--busy {
+  background: var(--app-danger-soft);
+  color: var(--app-danger);
+}
+
+.univer-room-status--idle {
+  background: var(--app-card-bg-strong);
+  color: var(--app-text-muted);
+}
+
+.free-room-next {
+  border-top-color: var(--app-card-border);
+}
+
+.settings-section--danger {
+  border-color: rgba(255, 141, 134, 0.3);
+}
+
+.settings-reset-button {
+  background: var(--app-danger);
+  color: #1d0c0a;
+  box-shadow: none;
+}
+
+.settings-reset-button:hover {
+  background: #ff9e98;
+}
+
+.onboarding-submit,
+.settings-save-button,
+.study-retry-button,
+.schedule-retry-button,
+.univer-retry-button,
+.planner-fab {
+  background: var(--app-accent);
+  color: #0d1724;
+  box-shadow: none;
+}
+
+.onboarding-submit:disabled,
+.settings-save-button:disabled {
+  opacity: 0.6;
+}
+
+.planner-fab:active,
+.onboarding-submit:active,
+.bottom-nav-item:active {
+  transform: none;
+  box-shadow: none;
+}
+
+.planner-task-pill--priority-low,
+.planner-task-pill--muted {
+  color: var(--app-text-muted);
+}
+
+.planner-task-pill--priority-medium {
+  background: var(--app-accent-soft);
+  border-color: var(--app-card-border-strong);
+  color: var(--app-accent);
+}
+
+.planner-task-pill--priority-high {
+  background: var(--app-danger-soft);
+  border-color: rgba(255, 141, 134, 0.24);
+  color: var(--app-danger);
+}
+
+.planner-task-pill--lesson {
+  background: var(--app-success-soft);
+  border-color: rgba(105, 207, 143, 0.24);
+  color: var(--app-success);
+}
+
+.planner-task-delete {
+  color: var(--app-danger);
+}
+
+@media (max-width: 640px) {
+  .schedule-header--modern,
+  .univer-header,
+  .study-subject-header {
+    flex-direction: column;
+  }
+
+  .study-student-metrics,
+  .profile-role-grid {
+    grid-template-columns: 1fr;
+  }
+}
