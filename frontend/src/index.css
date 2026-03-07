@@ -2560,6 +2560,7 @@ body {
 .study-subject-summary,
 .univer-room-slot,
 .profile-role-card,
+.profile-search-input-wrapper,
 .profile-selected-teacher,
 .profile-teacher-option,
 .settings-subgroup-toggle,
@@ -2598,8 +2599,7 @@ body {
   color: var(--app-text);
 }
 
-.onboarding-input,
-.univer-search-input {
+.onboarding-input {
   border: 1px solid var(--app-card-border);
   background: var(--app-card-bg-muted);
   color: var(--app-text-strong);
@@ -2610,15 +2610,66 @@ body {
   color: var(--app-text-muted);
 }
 
-.onboarding-input:focus,
-.univer-search-input:focus {
+.onboarding-input:focus {
   border-color: var(--app-card-border-strong);
   box-shadow: none;
 }
 
+.profile-search-input-wrapper,
+.univer-search-input-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 0 14px;
+  border-radius: 18px;
+  transition:
+    border-color 0.18s ease,
+    background-color 0.18s ease;
+}
+
+.profile-search-input-wrapper:focus-within,
+.univer-search-input-wrapper:focus-within {
+  border-color: var(--app-card-border-strong);
+  background: var(--app-card-bg);
+}
+
+.profile-search-input-wrapper--error {
+  border-color: var(--app-danger);
+  background: color-mix(
+    in srgb,
+    var(--app-danger-soft) 50%,
+    var(--app-card-bg-strong)
+  );
+}
+
 .univer-search-icon,
 .profile-search-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: static;
+  flex: 0 0 auto;
   color: var(--app-text-muted);
+  transform: none;
+}
+
+.univer-search-input,
+.onboarding-input--search {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  box-shadow: none;
+  color: var(--app-text-strong);
+}
+
+.univer-search-input:focus,
+.onboarding-input--search:focus {
+  border: none;
+  box-shadow: none;
 }
 
 .study-student-card {

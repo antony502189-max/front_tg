@@ -1898,6 +1898,11 @@ class BackendApp:
         extra_summary = None
 
         if student_group is not None:
+            summary_builder = (
+                self._find_student_rating_summary
+                if resolve_student_card_summary
+                else self._find_group_rating_summary
+            )
             futures = {
                 "rating": GRADES_EXECUTOR.submit(
                     self.request_upstream,
@@ -1905,7 +1910,7 @@ class BackendApp:
                     {"studentCardNumber": query_value},
                 ),
                 "summary": GRADES_EXECUTOR.submit(
-                    self._find_group_rating_summary,
+                    summary_builder,
                     query_value,
                     student_group,
                 ),

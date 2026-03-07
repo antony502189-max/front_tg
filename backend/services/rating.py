@@ -173,6 +173,26 @@ def normalize_course_values(payload: Any) -> list[int]:
     return normalized_courses
 
 
+def select_rating_candidate_courses(
+    available_courses: list[int],
+    inferred_course: int | None,
+    *,
+    allow_fallback_courses: bool = False,
+) -> list[int]:
+    if not available_courses:
+        return []
+
+    if inferred_course is None:
+        return list(available_courses)
+
+    if inferred_course in available_courses:
+        return [inferred_course] + [
+            course for course in available_courses if course != inferred_course
+        ]
+
+    return list(available_courses) if allow_fallback_courses else []
+
+
 def extract_rating_speciality_name(text: str | None) -> str | None:
     if not isinstance(text, str):
         return None
@@ -554,6 +574,8 @@ class RatingService:
         self,
         student_card_number: str,
         student_group: str | None,
+        *,
+        allow_fallback_courses: bool = False,
     ) -> dict[str, Any] | None:
         normalized_group = first_non_empty_string(student_group)
         if normalized_group is None:
@@ -624,6 +646,7 @@ class RatingService:
 
         inferred_course = infer_course_from_group(normalized_group)
         rating_candidates: list[RatingListCandidate] = []
+        seen_candidates: set[tuple[str, str, int]] = set()
 
         for speciality_candidate in [*speciality_candidates, *related_candidates]:
             faculty_id = speciality_candidate["facultyId"]
@@ -643,17 +666,21 @@ class RatingService:
                 )
                 continue
 
-            if inferred_course is not None and inferred_course not in available_courses:
-                continue
-
-            candidate_courses = (
-                [inferred_course] if inferred_course is not None else list(available_courses)
+            candidate_courses = select_rating_candidate_courses(
+                available_courses,
+                inferred_course,
+                allow_fallback_courses=allow_fallback_courses,
             )
             if not candidate_courses:
                 continue
 
             speciality_name = extract_rating_speciality_name(speciality_candidate["text"])
             for course in candidate_courses:
+                candidate_key = (faculty_id, speciality_id, course)
+                if candidate_key in seen_candidates:
+                    continue
+
+                seen_candidates.add(candidate_key)
                 rating_candidates.append(
                     RatingListCandidate(
                         faculty_id=faculty_id,
@@ -664,37 +691,16 @@ class RatingService:
                     )
                 )
 
-        for candidate in rating_candidates:
-            try:
-                payload = self.request_upstream_with_timeout(
-                    "/rating",
-                    {
-                        "sdef": candidate.speciality_id,
-                        "course": str(candidate.course),
-                    },
-                    max(self.request_timeout_ms, GRADES_RATING_LIST_TIMEOUT_MS),
-                    0,
-                )
-            except Exception as error:
-                if not isinstance(error, self.upstream_error_cls):
-                    raise
-
-                LOGGER.debug(
-                    "Rating list lookup failed for faculty %s speciality %s course %s: %s",
-                    candidate.faculty_id,
-                    candidate.speciality_id,
-                    candidate.course,
-                    error_message(error),
-                )
-                continue
-
-            summary = build_rating_list_summary(
-                payload,
-                student_card_number,
-                speciality=speciality_abbrev,
+        if inferred_course is not None:
+            rating_candidates.sort(
+                key=lambda candidate: candidate.course != inferred_course
             )
-            if summary is not None:
-                return summary
+
+        summary = self._scan_rating_candidates(student_card_number, rating_candidates)
+        if summary is not None:
+            summary = dict(summary)
+            summary["speciality"] = speciality_abbrev
+            return summary
 
         return fallback_summary
 
@@ -709,6 +715,7 @@ class RatingService:
             group_summary = self.find_group_rating_summary(
                 student_card_number,
                 normalized_group,
+                allow_fallback_courses=True,
             )
             if isinstance(group_summary, Mapping) and group_summary.get("position") is not None:
                 return dict(group_summary)

@@ -379,7 +379,13 @@ export const ProfileEditor = ({
               <label htmlFor="profile-teacher" className="onboarding-label">
                 ФИО преподавателя
               </label>
-              <div className="profile-search-input-wrapper">
+              <div
+                className={`profile-search-input-wrapper${
+                  touched.teacher && !isTeacherFormValid
+                    ? ' profile-search-input-wrapper--error'
+                    : ''
+                }`}
+              >
                 <span className="profile-search-icon" aria-hidden="true">
                   <Search size={16} />
                 </span>
@@ -387,11 +393,8 @@ export const ProfileEditor = ({
                   id="profile-teacher"
                   type="search"
                   autoComplete="off"
-                  className={`onboarding-input onboarding-input--search${
-                    touched.teacher && !isTeacherFormValid
-                      ? ' onboarding-input--error'
-                      : ''
-                  }`}
+                  className="onboarding-input onboarding-input--search"
+                  aria-invalid={touched.teacher && !isTeacherFormValid}
                   placeholder="Введите фамилию и инициалы"
                   value={teacherQuery}
                   onChange={(event) =>

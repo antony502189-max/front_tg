@@ -1075,6 +1075,78 @@ class BackendServerTests(unittest.TestCase):
         self.assertEqual(response.payload["summary"]["speciality"], "CS")
         self.assertEqual(response.payload["subjects"][0]["subject"], "Math")
 
+    def test_rating_route_uses_student_card_summary_when_group_has_no_position(
+        self,
+    ) -> None:
+        rating_list_calls = 0
+
+        def fetcher(path: str, params: dict[str, str]):
+            nonlocal rating_list_calls
+
+            if path == "/rating/studentRating":
+                return {
+                    "subjects": [
+                        {
+                            "id": "math",
+                            "subject": "Math",
+                            "marks": [{"value": 9}],
+                        }
+                    ]
+                }
+
+            if path == "/student-groups/filters":
+                self.assertEqual(params, {"name": "568403"})
+                return [
+                    {
+                        "id": 1,
+                        "name": "568403",
+                        "specialityAbbrev": "СиСИ",
+                    }
+                ]
+
+            if path == "/schedule/faculties":
+                return [{"id": 20040, "text": "ФИБ"}]
+
+            if path == "/rating/specialities":
+                self.assertEqual(params, {"facultyId": "20040"})
+                return [
+                    {
+                        "id": 20655,
+                        "text": "(6-05-0611-06) СиСИ (1 ступень дневная)",
+                    }
+                ]
+
+            if path == "/rating/courses":
+                self.assertEqual(
+                    params,
+                    {"facultyId": "20040", "specialityId": "20655"},
+                )
+                return [{"course": 1, "hasForeignPlan": False}]
+
+            if path == "/rating":
+                rating_list_calls += 1
+                self.assertEqual(params, {"sdef": "20655", "course": "1"})
+                return [
+                    {"studentCardNumber": "56841001", "average": 9.1},
+                    {"studentCardNumber": "56841006", "average": 8.28},
+                ]
+
+            raise AssertionError(f"Unexpected path: {path} {params}")
+
+        app = BackendApp(config=TEST_CONFIG, fetcher=fetcher)
+
+        response = app.handle_request(
+            "GET",
+            "/api/rating/56841006?studentGroup=568403",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.payload["summary"]["average"], 9.0)
+        self.assertEqual(response.payload["summary"]["position"], 2)
+        self.assertEqual(response.payload["summary"]["speciality"], "СиСИ")
+        self.assertEqual(response.payload["subjects"][0]["subject"], "Math")
+        self.assertEqual(rating_list_calls, 1)
+
     def test_rating_route_computes_position_from_student_card_without_group(self) -> None:
         def fetcher(path: str, params: dict[str, str]):
             if path == "/rating/studentSearch":
