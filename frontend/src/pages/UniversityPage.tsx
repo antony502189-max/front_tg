@@ -1,185 +1,149 @@
 import {
   startTransition,
-  useCallback,
   useDeferredValue,
-  useMemo,
   useState,
 } from 'react'
 import { Search } from 'lucide-react'
-import { searchAuditories, type Auditory } from '../api/auditories'
-import { searchTeachers, type Employee } from '../api/employees'
-import { getApiErrorMessage } from '../api/client'
+import { useShallow } from 'zustand/react/shallow'
 import {
-  fetchStudentSchedule,
-  type WeekSchedule,
-} from '../api/schedule'
-import { RoomResults } from '../components/university/RoomResults'
+  fetchFreeAuditories,
+  type FreeAuditoriesResponse,
+} from '../api/auditories'
+import { getApiErrorMessage } from '../api/client'
+import { searchTeachers, type Employee } from '../api/employees'
+import { FreeAuditoriesResults } from '../components/university/FreeAuditoriesResults'
 import { TeacherResults } from '../components/university/TeacherResults'
 import { useAsyncResource } from '../hooks/useAsyncResource'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import { useUserStore } from '../store/userStore'
-import {
-  collectAuditoryUsage,
-  describeAuditoryStatus,
-  type RoomResult,
-} from '../utils/university'
 
-type SearchMode = 'teachers' | 'auditories'
+type SearchMode = 'teachers' | 'freeRooms'
 
 const EMPTY_TEACHERS: Employee[] = []
-const EMPTY_AUDITORIES: Auditory[] = []
-const TEACHER_QUERY_MIN_LENGTH = 2
-const AUDITORY_QUERY_MIN_LENGTH = 1
-
-const SEARCH_MODE_CONFIG = {
-  teachers: {
-    placeholder: 'Например, Иванов или кафедра СиСИ',
-    hint: 'Введите минимум 2 символа, чтобы начать поиск.',
-    minimumLength: TEACHER_QUERY_MIN_LENGTH,
-  },
-  auditories: {
-    placeholder: 'Например, 514 или 5 к.',
-    hint: 'Введите номер аудитории или корпус. Занятость считается по вашей группе.',
-    minimumLength: AUDITORY_QUERY_MIN_LENGTH,
-  },
-} satisfies Record<
+const SEARCH_MODE_CONFIG: Record<
   SearchMode,
   {
     placeholder: string
     hint: string
     minimumLength: number
   }
->
-
-const createTeachersRequestKey = (query: string) =>
-  `teachers:${query}`
-
-const createAuditoriesRequestKey = (query: string) =>
-  `auditories:${query}`
-
-const createScheduleRequestKey = (groupNumber: string) =>
-  `schedule:${groupNumber}`
+> = {
+  teachers: {
+    placeholder: '????????, ?????? ?.?. ??? ??????',
+    hint: '??????? 2 ??????? ??? ?????? ????????????? ?? ???.',
+    minimumLength: 2,
+  },
+  freeRooms: {
+    placeholder: '????????, 303, 5? ??? ???????????',
+    hint: '??????? 1 ??????. ??????? ?????? ?????????, ??????? ???????? ????? ??????.',
+    minimumLength: 1,
+  },
+}
 
 export const UniversityPage = () => {
-  const groupNumber = useUserStore((state) => state.groupNumber)
-  const normalizedGroupNumber = groupNumber?.trim() ?? ''
+  const { role, groupNumber, urlId, employeeId, fullName } = useUserStore(
+    useShallow((state) => ({
+      role: state.role,
+      groupNumber: state.groupNumber,
+      urlId: state.urlId,
+      employeeId: state.employeeId,
+      fullName: state.fullName,
+    })),
+  )
 
   const [mode, setMode] = useState<SearchMode>('teachers')
   const [query, setQuery] = useState('')
-  const deferredQuery = useDeferredValue(query)
-  const debouncedQuery = useDebouncedValue(
-    deferredQuery.trim(),
-    350,
-  )
 
-  const hasGroup = normalizedGroupNumber.length > 0
+  const deferredQuery = useDeferredValue(query)
+  const debouncedQuery = useDebouncedValue(deferredQuery.trim(), 350)
+  const searchConfig = SEARCH_MODE_CONFIG[mode]
+
+  const normalizedGroupNumber = groupNumber.trim()
+  const normalizedTeacherUrlId = urlId.trim()
+  const normalizedTeacherEmployeeId = employeeId.trim()
+  const hasProfileIdentity =
+    role === 'teacher'
+      ? normalizedTeacherUrlId.length > 0
+      : normalizedGroupNumber.length > 0
+
   const hasTeacherQuery =
     mode === 'teachers' &&
-    debouncedQuery.length >=
-      SEARCH_MODE_CONFIG.teachers.minimumLength
-  const hasAuditoryQuery =
-    mode === 'auditories' &&
-    debouncedQuery.length >=
-      SEARCH_MODE_CONFIG.auditories.minimumLength
-
-  const loadTeachers = useCallback(
-    (signal: AbortSignal) =>
-      searchTeachers(debouncedQuery, signal),
-    [debouncedQuery],
-  )
-  const loadAuditories = useCallback(
-    (signal: AbortSignal) =>
-      searchAuditories(debouncedQuery, signal),
-    [debouncedQuery],
-  )
-  const loadWeekSchedule = useCallback(
-    (signal: AbortSignal) =>
-      fetchStudentSchedule(normalizedGroupNumber, signal),
-    [normalizedGroupNumber],
-  )
+    debouncedQuery.length >= SEARCH_MODE_CONFIG.teachers.minimumLength
+  const hasFreeRoomQuery =
+    mode === 'freeRooms' &&
+    debouncedQuery.length >= SEARCH_MODE_CONFIG.freeRooms.minimumLength
 
   const teacherResource = useAsyncResource<Employee[]>({
     enabled: hasTeacherQuery,
-    requestKey: hasTeacherQuery
-      ? createTeachersRequestKey(debouncedQuery)
-      : null,
+    requestKey: hasTeacherQuery ? `teachers:${debouncedQuery}` : null,
     initialData: EMPTY_TEACHERS,
-    load: loadTeachers,
-    getErrorMessage: (error) =>
+    load: (signal) => searchTeachers(debouncedQuery, signal),
+    getErrorMessage: (requestError) =>
       getApiErrorMessage(
-        error,
-        'Не удалось загрузить список преподавателей. Попробуйте ещё раз.',
-      ),
-  })
-  const auditoryResource = useAsyncResource<Auditory[]>({
-    enabled: hasAuditoryQuery,
-    requestKey: hasAuditoryQuery
-      ? createAuditoriesRequestKey(debouncedQuery)
-      : null,
-    initialData: EMPTY_AUDITORIES,
-    load: loadAuditories,
-    getErrorMessage: (error) =>
-      getApiErrorMessage(
-        error,
-        'Не удалось загрузить аудитории. Попробуйте ещё раз.',
-      ),
-  })
-  const scheduleResource = useAsyncResource<WeekSchedule | null>({
-    enabled: hasGroup,
-    requestKey: hasGroup
-      ? createScheduleRequestKey(normalizedGroupNumber)
-      : null,
-    initialData: null,
-    load: loadWeekSchedule,
-    getErrorMessage: (error) =>
-      getApiErrorMessage(
-        error,
-        'Не удалось загрузить расписание группы для аудиторий.',
+        requestError,
+        '?? ??????? ????????? ??????????????. ?????????? ??? ???.',
       ),
   })
 
-  const roomResults = useMemo<RoomResult[]>(
-    () =>
-      auditoryResource.data.map((auditory) => {
-        const usage = collectAuditoryUsage(
-          auditory,
-          scheduleResource.data,
-        )
-        const { current, next } = describeAuditoryStatus(usage)
+  const freeAuditoriesResource = useAsyncResource<FreeAuditoriesResponse>({
+    enabled: hasProfileIdentity && hasFreeRoomQuery,
+    requestKey:
+      hasProfileIdentity && hasFreeRoomQuery && role
+        ? [
+            'free-rooms',
+            role,
+            debouncedQuery,
+            role === 'teacher'
+              ? normalizedTeacherUrlId
+              : normalizedGroupNumber,
+          ].join(':')
+        : null,
+    initialData: {
+      generatedAt: '',
+      items: [],
+    },
+    load: (signal) =>
+      fetchFreeAuditories(
+        {
+          role: role ?? 'student',
+          query: debouncedQuery,
+          groupNumber: normalizedGroupNumber,
+          teacherUrlId: normalizedTeacherUrlId,
+          teacherEmployeeId: normalizedTeacherEmployeeId,
+        },
+        signal,
+      ),
+    getErrorMessage: (requestError) =>
+      getApiErrorMessage(
+        requestError,
+        '?? ??????? ????????? ????????? ?????????. ?????????? ??? ???.',
+      ),
+  })
 
-        return {
-          auditory,
-          usage,
-          current,
-          next,
-        }
-      }),
-    [auditoryResource.data, scheduleResource.data],
-  )
-
-  const handleModeChange = (nextMode: SearchMode) => {
-    if (nextMode === mode) {
-      return
-    }
-
-    startTransition(() => {
-      setMode(nextMode)
-      setQuery('')
-    })
-  }
-
-  const searchConfig = SEARCH_MODE_CONFIG[mode]
+  const identityLabel =
+    role === 'teacher'
+      ? fullName.trim() || '??????? ?????????????'
+      : normalizedGroupNumber
+        ? `?????? ${normalizedGroupNumber}`
+        : '??????? ????????'
 
   return (
     <div className="planner-page">
-      <div className="univer-inner">
+      <div className="univer-inner univer-inner--modern">
         <header className="univer-header">
           <div>
-            <h1 className="planner-title">Универ</h1>
+            <span className="univer-kicker">??????? ????????????</span>
+            <h1 className="planner-title">??????</h1>
             <p className="planner-subtitle">
-              Ищите преподавателей и проверяйте аудитории по
-              вашему расписанию.
+              {role === 'teacher'
+                ? '????? ?????????????? ? ????????? ????????? ?? ?????? ?????????? ?????????????.'
+                : '????? ?????????????? ? ????????? ????????? ?? ?????????? ????? ??????.'}
             </p>
+          </div>
+
+          <div className="univer-identity-card">
+            <span className="univer-identity-label">??????? ???????</span>
+            <strong className="univer-identity-value">{identityLabel}</strong>
           </div>
         </header>
 
@@ -189,26 +153,41 @@ export const UniversityPage = () => {
             role="tab"
             aria-selected={mode === 'teachers'}
             className={`univer-mode-tab${
-              mode === 'teachers'
-                ? ' univer-mode-tab--active'
-                : ''
+              mode === 'teachers' ? ' univer-mode-tab--active' : ''
             }`}
-            onClick={() => handleModeChange('teachers')}
+            onClick={() => {
+              if (mode === 'teachers') {
+                return
+              }
+
+              startTransition(() => {
+                setMode('teachers')
+                setQuery('')
+              })
+            }}
           >
-            Преподаватели
+            ?????????????
           </button>
+
           <button
             type="button"
             role="tab"
-            aria-selected={mode === 'auditories'}
+            aria-selected={mode === 'freeRooms'}
             className={`univer-mode-tab${
-              mode === 'auditories'
-                ? ' univer-mode-tab--active'
-                : ''
+              mode === 'freeRooms' ? ' univer-mode-tab--active' : ''
             }`}
-            onClick={() => handleModeChange('auditories')}
+            onClick={() => {
+              if (mode === 'freeRooms') {
+                return
+              }
+
+              startTransition(() => {
+                setMode('freeRooms')
+                setQuery('')
+              })
+            }}
           >
-            Аудитории
+            ????????? ?????????
           </button>
         </div>
 
@@ -237,16 +216,14 @@ export const UniversityPage = () => {
             onRetry={teacherResource.reload}
           />
         ) : (
-          <RoomResults
-            hasGroup={hasGroup}
-            hasQuery={hasAuditoryQuery}
-            roomResults={roomResults}
-            scheduleError={scheduleResource.error}
-            isScheduleLoading={scheduleResource.isLoading}
-            auditoriesError={auditoryResource.error}
-            isAuditoriesLoading={auditoryResource.isLoading}
-            onRetrySchedule={scheduleResource.reload}
-            onRetryAuditories={auditoryResource.reload}
+          <FreeAuditoriesResults
+            hasProfileIdentity={hasProfileIdentity}
+            hasQuery={hasFreeRoomQuery}
+            isLoading={freeAuditoriesResource.isLoading}
+            error={freeAuditoriesResource.error}
+            items={freeAuditoriesResource.data.items}
+            generatedAt={freeAuditoriesResource.data.generatedAt}
+            onRetry={freeAuditoriesResource.reload}
           />
         )}
       </div>

@@ -1,220 +1,124 @@
-import { useCallback } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useShallow } from 'zustand/react/shallow'
+import { deleteUserProfile } from '../api/profile'
+import { ProfileEditor } from '../components/profile/ProfileEditor'
 import { useTelegramBackButton } from '../hooks/useTelegramBackButton'
-import {
-  GROUP_LENGTH,
-  STUDENT_CARD_MIN_LENGTH,
-  useStudentProfileForm,
-} from '../hooks/useStudentProfileForm'
 import { useUserStore, type Subgroup } from '../store/userStore'
+import { resolveSessionUserId } from '../telegram/session'
 
-const SUBGROUP_OPTIONS: { value: Subgroup; label: string }[] = [
-  { value: 'all', label: 'Все' },
+const SUBGROUP_OPTIONS: Array<{ value: Subgroup; label: string }> = [
+  { value: 'all', label: '???' },
   { value: '1', label: '1' },
   { value: '2', label: '2' },
 ]
 
 export const SettingsPage = () => {
   const navigate = useNavigate()
-
-  useTelegramBackButton()
-
-  const {
-    initialGroupNumber,
-    initialCardNumber,
-    subgroup,
-    setOnboardingData,
-    setSubgroup,
-    resetUser,
-  } = useUserStore(
+  const [isResetting, setIsResetting] = useState(false)
+  const { role, subgroup, setSubgroup, resetUser } = useUserStore(
     useShallow((state) => ({
-      initialGroupNumber: state.groupNumber,
-      initialCardNumber: state.studentCardNumber,
+      role: state.role,
       subgroup: state.subgroup,
-      setOnboardingData: state.setOnboardingData,
       setSubgroup: state.setSubgroup,
       resetUser: state.resetUser,
     })),
   )
-  const handleProfileSubmit = useCallback(
-    ({
-      groupNumber,
-      studentCardNumber,
-    }: {
-      groupNumber: string
-      studentCardNumber: string
-    }) => {
-      setOnboardingData({
-        groupNumber,
-        studentCardNumber,
-      })
-    },
-    [setOnboardingData],
-  )
-  const {
-    groupNumber,
-    studentCardNumber,
-    touched,
-    isGroupValid,
-    isCardValid,
-    isFormValid,
-    updateGroupNumber,
-    updateStudentCardNumber,
-    markFieldTouched,
-    handleSubmit,
-  } = useStudentProfileForm({
-    initialGroupNumber,
-    initialStudentCardNumber: initialCardNumber,
-    onSubmit: handleProfileSubmit,
-  })
-  const handleReset = useCallback(() => {
-    resetUser()
-    navigate('/onboarding', { replace: true })
-  }, [navigate, resetUser])
+
+  useTelegramBackButton({ to: '/app/planner' })
+
+  const handleReset = async () => {
+    if (isResetting) {
+      return
+    }
+
+    setIsResetting(true)
+
+    try {
+      await deleteUserProfile(resolveSessionUserId())
+    } catch {
+      // Local reset should still happen even if backend profile deletion fails.
+    } finally {
+      resetUser()
+      navigate('/onboarding', { replace: true })
+    }
+  }
 
   return (
     <div className="planner-page">
-      <div className="settings-inner">
+      <div className="settings-inner settings-inner--modern">
         <header className="settings-header">
           <div>
-            <h1 className="planner-title">Настройки</h1>
+            <h1 className="planner-title">?????????</h1>
             <p className="planner-subtitle">
-              Обновите данные студента и выберите подгруппу.
+              ???????? ???????, ??????? ???????????? ??? ??????????, ????? ?
+              ??????????????? ????????.
             </p>
           </div>
         </header>
 
-        <section className="settings-section">
-          <h2 className="settings-section-title">Данные студента</h2>
-          <form
-            className="settings-form"
-            onSubmit={handleSubmit}
-            noValidate
-          >
-            <div className="onboarding-field">
-              <label
-                htmlFor="settings-group"
-                className="onboarding-label"
-              >
-                Учебная группа
-              </label>
-              <input
-                id="settings-group"
-                inputMode="numeric"
-                autoComplete="off"
-                className={`onboarding-input${
-                  touched.group && !isGroupValid
-                    ? ' onboarding-input--error'
-                    : ''
-                }`}
-                placeholder="Например, 123456"
-                value={groupNumber}
-                onChange={(event) =>
-                  updateGroupNumber(event.target.value)
-                }
-                onBlur={() => markFieldTouched('group')}
-              />
-              {touched.group && !isGroupValid ? (
-                <p className="onboarding-error">
-                  Номер группы должен содержать ровно {GROUP_LENGTH}{' '}
-                  цифр.
-                </p>
-              ) : (
-                <p className="onboarding-hint">
-                  Только цифры, без букв и пробелов.
-                </p>
-              )}
-            </div>
+        <ProfileEditor
+          title="???????"
+          subtitle="????????? ??????????? ? ????????? ????????? ? ? backend-???????."
+          submitLabel="????????? ?????????"
+        />
 
-            <div className="onboarding-field">
-              <label
-                htmlFor="settings-card"
-                className="onboarding-label"
-              >
-                Номер студенческого
-              </label>
-              <input
-                id="settings-card"
-                inputMode="text"
-                autoComplete="off"
-                className={`onboarding-input${
-                  touched.card && !isCardValid
-                    ? ' onboarding-input--error'
-                    : ''
-                }`}
-                placeholder="Как в IIS, например 12345678"
-                value={studentCardNumber}
-                onChange={(event) =>
-                  updateStudentCardNumber(event.target.value)
-                }
-                onBlur={() => markFieldTouched('card')}
-              />
-              {touched.card && !isCardValid ? (
-                <p className="onboarding-error">
-                  Введите номер студенческого как минимум из{' '}
-                  {STUDENT_CARD_MIN_LENGTH} символов.
-                </p>
-              ) : (
-                <p className="onboarding-hint">
-                  Можно вводить так же, как номер записан в IIS.
-                </p>
-              )}
-            </div>
+        {role === 'student' && (
+          <section className="settings-section">
+            <h2 className="settings-section-title">?????????</h2>
+            <p className="settings-section-text">
+              ???????????? ??? ?????????? ???????, ???? ? ?????????? ????
+              ????????? ?? ??????????.
+            </p>
+            <div className="settings-subgroup-toggle" role="radiogroup">
+              {SUBGROUP_OPTIONS.map((item) => {
+                const isActive = subgroup === item.value
 
-            <div className="settings-actions">
-              <button
-                type="submit"
-                className="settings-save-button"
-                disabled={!isFormValid}
-              >
-                Сохранить
-              </button>
+                return (
+                  <button
+                    key={item.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={isActive}
+                    className={`settings-subgroup-button${
+                      isActive ? ' settings-subgroup-button--active' : ''
+                    }`}
+                    onClick={() => setSubgroup(item.value)}
+                  >
+                    {item.label}
+                  </button>
+                )
+              })}
             </div>
-          </form>
-        </section>
+          </section>
+        )}
 
-        <section className="settings-section">
-          <h2 className="settings-section-title">Подгруппа</h2>
-          <div className="settings-subgroup-toggle" role="radiogroup">
-            {SUBGROUP_OPTIONS.map((item) => {
-              const isActive = subgroup === item.value
-              return (
-                <button
-                  key={item.value}
-                  type="button"
-                  role="radio"
-                  aria-checked={isActive}
-                  className={`settings-subgroup-button${
-                    isActive
-                      ? ' settings-subgroup-button--active'
-                      : ''
-                  }`}
-                  onClick={() => setSubgroup(item.value)}
-                >
-                  {item.label}
-                </button>
-              )
-            })}
-          </div>
-        </section>
+        {role === 'teacher' && (
+          <section className="settings-section">
+            <h2 className="settings-section-title">????? ?????????????</h2>
+            <p className="settings-section-text">
+              ??? ????????????? ??????? ?????? `employeeId` ? `urlId`. ??? ????
+              ???????????? ??? ?????? ????????????? ?????????? ????? backend.
+            </p>
+          </section>
+        )}
 
         <section className="settings-section settings-section--danger">
-          <h2 className="settings-section-title">Сбросить данные</h2>
+          <h2 className="settings-section-title">???????? ???????</h2>
           <p className="settings-section-text">
-            Очистит сохранённые данные и вернёт вас на экран
-            онбординга.
+            ?????? ????????? ?????? ? backend-???????, ????? ?????? ??? ?? ?????
+            ??????? ?????.
           </p>
           <button
             type="button"
             className="settings-reset-button"
             onClick={handleReset}
+            disabled={isResetting}
           >
-            Очистить данные и выйти
+            {isResetting ? '??????????...' : '??????? ??????? ? ?????'}
           </button>
         </section>
       </div>
     </div>
   )
 }
-

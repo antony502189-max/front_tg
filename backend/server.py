@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock
 from typing import Any, Callable, Mapping
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import parse_qs, quote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 try:
@@ -23,6 +23,11 @@ try:
         load_webhook_config,
         matches_webhook_secret,
     )
+    from backend.user_profiles import (
+        ProfileValidationError,
+        UserProfile,
+        UserProfileStore,
+    )
 except ModuleNotFoundError:  # pragma: no cover - fallback for direct script launch
     from env import load_project_env, parse_number_env, parse_string_env  # type: ignore
     from telegram_bot import (  # type: ignore
@@ -32,6 +37,11 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for direct script lau
         build_webhook_url,
         load_webhook_config,
         matches_webhook_secret,
+    )
+    from user_profiles import (  # type: ignore
+        ProfileValidationError,
+        UserProfile,
+        UserProfileStore,
     )
 
 
@@ -93,6 +103,23 @@ ORDERED_WEEKDAYS = tuple(
         key=lambda item: item[1],
     )
 )
+INDEX_TO_RUSSIAN_WEEKDAY = {
+    index: day_name for day_name, index in RUSSIAN_WEEKDAY_TO_INDEX.items()
+}
+SUPPORTED_SCHEDULE_VIEWS = frozenset({"day", "week", "month"})
+LESSON_TYPE_ALIASES = {
+    "лк": "lecture",
+    "лек": "lecture",
+    "лекция": "lecture",
+    "пз": "practice",
+    "практика": "practice",
+    "сем": "practice",
+    "сз": "practice",
+    "лр": "lab",
+    "лб": "lab",
+    "лаб": "lab",
+    "лабораторная": "lab",
+}
 GRADES_EXECUTOR = ThreadPoolExecutor(max_workers=4)
 
 
@@ -416,6 +443,85 @@ def normalize_current_week(payload: Any) -> int:
     return 1
 
 
+def normalize_schedule_view(value: Any) -> str:
+    if not isinstance(value, str):
+        return "week"
+
+    normalized = value.strip().lower()
+    return normalized if normalized in SUPPORTED_SCHEDULE_VIEWS else "week"
+
+
+def parse_iso_date(raw_value: Any) -> date | None:
+    if not isinstance(raw_value, str) or not raw_value.strip():
+        return None
+
+    try:
+        return datetime.strptime(raw_value.strip(), "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def week_start(value: date) -> date:
+    return value - timedelta(days=value.weekday())
+
+
+def schedule_week_for_date(
+    current_week: int,
+    today_value: date,
+    lesson_date: date,
+) -> int:
+    base_monday = week_start(today_value)
+    lesson_monday = week_start(lesson_date)
+    offset_weeks = (lesson_monday - base_monday).days // 7
+    return ((current_week - 1 + offset_weeks) % 4) + 1
+
+
+def resolve_schedule_range(reference_date: date, view: str) -> tuple[date, date]:
+    normalized_view = normalize_schedule_view(view)
+
+    if normalized_view == "day":
+        return reference_date, reference_date
+
+    if normalized_view == "month":
+        month_start = reference_date.replace(day=1)
+        if reference_date.month == 12:
+            next_month = reference_date.replace(
+                year=reference_date.year + 1,
+                month=1,
+                day=1,
+            )
+        else:
+            next_month = reference_date.replace(
+                month=reference_date.month + 1,
+                day=1,
+            )
+        return month_start, next_month - timedelta(days=1)
+
+    start = week_start(reference_date)
+    return start, start + timedelta(days=6)
+
+
+def iterate_schedule_dates(start_date: date, end_date: date) -> list[date]:
+    days: list[date] = []
+    current = start_date
+    while current <= end_date:
+        days.append(current)
+        current += timedelta(days=1)
+    return days
+
+
+def weekday_name_for_date(value: date) -> str | None:
+    return INDEX_TO_RUSSIAN_WEEKDAY.get(value.weekday())
+
+
+def normalize_lesson_kind(raw_type: str | None) -> str:
+    normalized = normalize_lookup_value(raw_type)
+    for key, lesson_kind in LESSON_TYPE_ALIASES.items():
+        if normalized.startswith(key):
+            return lesson_kind
+    return "other"
+
+
 def compose_full_name(raw: dict[str, Any]) -> str | None:
     fio = first_non_empty_field(raw, "fio")
     if fio is not None:
@@ -470,7 +576,7 @@ def normalize_schedule_lesson(
 ) -> dict[str, Any]:
     subject = (
         first_non_empty_field(raw_lesson, "subjectFullName", "subject")
-        or "Дисциплина"
+        or "\u0414\u0438\u0441\u0446\u0438\u043f\u043b\u0438\u043d\u0430"
     )
 
     employees = raw_lesson.get("employees")
@@ -509,6 +615,8 @@ def normalize_schedule_lesson(
         "teacher": teacher,
         "room": room,
         "type": lesson_type,
+        "typeLabel": lesson_type,
+        "typeKey": normalize_lesson_kind(lesson_type),
         "startTime": start_time,
         "endTime": end_time,
         "date": date_value,
@@ -519,25 +627,40 @@ def normalize_schedule_response(
     payload: Any,
     current_week: int,
     today_value: date,
+    *,
+    reference_date: date | None = None,
+    view: str = "week",
 ) -> dict[str, Any]:
     schedules = payload.get("schedules") if isinstance(payload, dict) else None
-    if not isinstance(schedules, dict):
-        return {"days": []}
+    normalized_view = normalize_schedule_view(view)
+    target_date = reference_date or today_value
+    range_start, range_end = resolve_schedule_range(target_date, normalized_view)
 
-    monday = today_value - timedelta(days=today_value.weekday())
+    if not isinstance(schedules, dict):
+        return {
+            "view": normalized_view,
+            "rangeStart": range_start.isoformat(),
+            "rangeEnd": range_end.isoformat(),
+            "days": [],
+        }
+
     days = []
 
-    for day_name in ORDERED_WEEKDAYS:
-        day_index = RUSSIAN_WEEKDAY_TO_INDEX[day_name]
-        lesson_date = monday + timedelta(days=day_index)
-        raw_lessons = schedules.get(day_name)
+    for lesson_date in iterate_schedule_dates(range_start, range_end):
+        day_name = weekday_name_for_date(lesson_date)
+        raw_lessons = schedules.get(day_name) if day_name is not None else None
         lessons = []
+        lesson_week = schedule_week_for_date(
+            current_week,
+            today_value,
+            lesson_date,
+        )
 
         if isinstance(raw_lessons, list):
             for index, item in enumerate(raw_lessons):
                 if not isinstance(item, dict):
                     continue
-                if not lesson_matches_week(item, current_week):
+                if not lesson_matches_week(item, lesson_week):
                     continue
                 if not lesson_matches_date(item, lesson_date):
                     continue
@@ -548,7 +671,12 @@ def normalize_schedule_response(
         lessons.sort(key=lambda lesson: (lesson["startTime"], lesson["subject"]))
         days.append({"date": lesson_date.isoformat(), "lessons": lessons})
 
-    return {"days": days}
+    return {
+        "view": normalized_view,
+        "rangeStart": range_start.isoformat(),
+        "rangeEnd": range_end.isoformat(),
+        "days": days,
+    }
 
 
 def normalize_employees_response(
@@ -566,16 +694,38 @@ def normalize_employees_response(
         if not isinstance(item, dict):
             continue
 
-        full_name = compose_full_name(item) or "Преподаватель"
-        employee_id = item.get("id")
+        full_name = compose_full_name(item) or "\u041f\u0440\u0435\u043f\u043e\u0434\u0430\u0432\u0430\u0442\u0435\u043b\u044c"
+        raw_employee_id = item.get("id")
+        if raw_employee_id is None:
+            raw_employee_id = item.get("employeeId")
+        employee_id = (
+            str(raw_employee_id).strip()
+            if raw_employee_id is not None and str(raw_employee_id).strip()
+            else None
+        )
+        raw_url_id = item.get("urlId")
+        if raw_url_id is None:
+            raw_url_id = item.get("urlID")
+        if raw_url_id is None:
+            raw_url_id = item.get("url_id")
+        url_id = (
+            str(raw_url_id).strip()
+            if raw_url_id is not None and str(raw_url_id).strip()
+            else None
+        )
         avatar_url = first_non_empty_field(item, "photoLink")
 
         if avatar_url is None and employee_id is not None:
             avatar_url = f"{base_url}/employees/photo/{employee_id}"
 
+        normalized_url_id = url_id or employee_id
+        normalized_employee_id = employee_id or normalized_url_id
+
         result.append(
             {
-                "id": str(employee_id or full_name),
+                "id": str(normalized_url_id or full_name),
+                "employeeId": str(normalized_employee_id or full_name),
+                "urlId": str(normalized_url_id or normalized_employee_id or full_name),
                 "fullName": full_name,
                 "position": first_non_empty_field(
                     item,
@@ -666,6 +816,190 @@ def normalize_auditories_response(payload: Any, query: str) -> list[dict[str, An
 
     ranked_result.sort(key=lambda item: (item[0], item[1]))
     return [item[2] for item in ranked_result[:50]]
+
+
+def normalize_room_token(value: str) -> str:
+    return (
+        value.lower()
+        .replace(" ", "")
+        .replace(",", "")
+        .replace(".", "")
+        .replace("-", "")
+        .replace("корпус", "к")
+    )
+
+
+def extract_room_digits(value: str) -> str:
+    return "".join(character for character in value if character.isdigit())
+
+
+def get_auditory_tokens(auditory: Mapping[str, Any]) -> list[str]:
+    building_value = first_non_empty_string(auditory.get("building"))
+    building_digits = ""
+    room_name = first_non_empty_string(auditory.get("name"))
+    if isinstance(building_value, str):
+        matches = [character for character in building_value if character.isdigit()]
+        building_digits = "".join(matches)
+
+    tokens = [
+        first_non_empty_string(auditory.get("fullName")),
+        room_name,
+        "-".join(
+            part
+            for part in (
+                room_name,
+                building_value,
+            )
+            if part
+        ),
+    ]
+
+    if building_digits and room_name:
+        tokens.append(f"{room_name}-{building_digits}к")
+        tokens.append(f"{room_name}{building_digits}")
+
+    return [normalize_room_token(token) for token in tokens if isinstance(token, str) and token]
+
+
+def lesson_matches_auditory(room_value: str | None, auditory_tokens: list[str]) -> bool:
+    if room_value is None:
+        return False
+
+    room_tokens = [
+        normalize_room_token(item)
+        for item in room_value.split(",")
+        if isinstance(item, str) and item.strip()
+    ]
+    auditory_digit_tokens = [
+        extract_room_digits(token) for token in auditory_tokens if extract_room_digits(token)
+    ]
+
+    for room_token in room_tokens:
+        room_digits = extract_room_digits(room_token)
+        for auditory_token in auditory_tokens:
+            if (
+                room_token == auditory_token
+                or room_token in auditory_token
+                or auditory_token in room_token
+            ):
+                return True
+        if room_digits and room_digits in auditory_digit_tokens:
+            return True
+
+    return False
+
+
+def build_date_time(date_key: str, time_value: str) -> datetime | None:
+    lesson_date = parse_iso_date(date_key)
+    if lesson_date is None:
+        return None
+
+    if not isinstance(time_value, str):
+        return None
+
+    parts = time_value.split(":")
+    if len(parts) != 2:
+        return None
+
+    try:
+        hour = int(parts[0])
+        minute = int(parts[1])
+    except ValueError:
+        return None
+
+    return datetime(
+        lesson_date.year,
+        lesson_date.month,
+        lesson_date.day,
+        hour,
+        minute,
+    )
+
+
+def normalize_free_auditories_response(
+    auditories_payload: Any,
+    schedule_payload: Mapping[str, Any],
+    query: str,
+    now_value: datetime,
+) -> dict[str, Any]:
+    auditories = normalize_auditories_response(auditories_payload, query)
+    days = schedule_payload.get("days") if isinstance(schedule_payload, dict) else None
+    if not isinstance(days, list):
+        days = []
+
+    free_items = []
+
+    for auditory in auditories:
+        if not isinstance(auditory, dict):
+            continue
+
+        auditory_tokens = get_auditory_tokens(auditory)
+        current_lesson = None
+        next_lesson = None
+
+        for day in days:
+            if not isinstance(day, dict):
+                continue
+
+            day_key = first_non_empty_field(day, "date")
+            lessons = day.get("lessons")
+            if day_key is None or not isinstance(lessons, list):
+                continue
+
+            for lesson in lessons:
+                if not isinstance(lesson, dict):
+                    continue
+                if not lesson_matches_auditory(
+                    first_non_empty_field(lesson, "room"),
+                    auditory_tokens,
+                ):
+                    continue
+
+                start_value = build_date_time(
+                    day_key,
+                    first_non_empty_field(lesson, "startTime") or "",
+                )
+                end_value = build_date_time(
+                    day_key,
+                    first_non_empty_field(lesson, "endTime") or "",
+                )
+                if start_value is None or end_value is None:
+                    continue
+
+                if start_value <= now_value <= end_value:
+                    current_lesson = {
+                        "subject": first_non_empty_field(lesson, "subject"),
+                        "date": day_key,
+                        "startTime": first_non_empty_field(lesson, "startTime"),
+                        "endTime": first_non_empty_field(lesson, "endTime"),
+                    }
+                    break
+
+                if now_value < start_value and next_lesson is None:
+                    next_lesson = {
+                        "subject": first_non_empty_field(lesson, "subject"),
+                        "date": day_key,
+                        "startTime": first_non_empty_field(lesson, "startTime"),
+                        "endTime": first_non_empty_field(lesson, "endTime"),
+                    }
+
+            if current_lesson is not None:
+                break
+
+        if current_lesson is not None:
+            continue
+
+        free_items.append(
+            {
+                **auditory,
+                "nextBusyLesson": next_lesson,
+            }
+        )
+
+    return {
+        "generatedAt": now_value.isoformat(),
+        "items": free_items,
+    }
 
 
 def find_student_card_match(
@@ -975,6 +1309,34 @@ def normalize_grades_response(
     return response
 
 
+
+def parse_json_request_body(body: bytes | None) -> dict[str, Any]:
+    if not body:
+        raise ProfileValidationError("Request body is required")
+
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ProfileValidationError("Request body must be valid JSON") from error
+
+    if not isinstance(payload, dict):
+        raise ProfileValidationError("JSON body must be an object")
+
+    return payload
+
+
+def first_query_value(parsed_url: Any, *names: str) -> str | None:
+    query = parse_qs(parsed_url.query)
+    for name in names:
+        value = query.get(name, [None])[0]
+        if not isinstance(value, str):
+            continue
+        normalized = value.strip()
+        if normalized:
+            return normalized
+    return None
+
+
 class BackendApp:
     def __init__(
         self,
@@ -985,6 +1347,7 @@ class BackendApp:
         now_ms: NowFn | None = None,
         today: TodayFn | None = None,
         telegram_bot_app: TelegramBotApp | None = None,
+        profile_store: UserProfileStore | None = None,
     ) -> None:
         self.config = self._resolve_config(config)
         self.store = {} if store is None else store
@@ -994,10 +1357,10 @@ class BackendApp:
         self.today = today or (lambda: datetime.now().date())
         self.started_at_ms = self.now_ms()
         self.lock = Lock()
+        self.profile_store = profile_store or UserProfileStore()
         self._inflight_requests: dict[str, Future[JsonValue]] = {}
         self._timeout_fetchers: dict[int, Fetcher] = {}
         self._route_payload_builders = {
-            "schedule": self._build_schedule_payload,
             "employees": self._build_employees_payload,
             "auditories": self._build_auditories_payload,
             "grades": self._build_grades_payload,
@@ -1084,19 +1447,98 @@ class BackendApp:
             self.config.retry_delay_ms,
         )
 
-    def _build_schedule_payload(self, query_value: str) -> JsonValue:
-        schedule_payload = self.request_upstream(
-            "/schedule",
-            {"studentGroup": query_value},
-        )
-        current_week = normalize_current_week(
+    def _fetch_current_week(self) -> int:
+        return normalize_current_week(
             self.request_upstream("/schedule/current-week", {})
         )
 
+    def _request_teacher_schedule(
+        self,
+        url_id: str,
+        employee_id: str | None = None,
+    ) -> JsonValue:
+        candidate_paths = [f"/employees/schedule/{quote(url_id, safe='')}"]
+
+        if employee_id and employee_id != url_id:
+            candidate_paths.append(
+                f"/employees/schedule/{quote(employee_id, safe='')}"
+            )
+
+        last_error: UpstreamRequestError | None = None
+        for path in candidate_paths:
+            try:
+                return self.request_upstream(path, {})
+            except UpstreamRequestError as error:
+                last_error = error
+                if error.status != 404:
+                    raise
+
+        raise last_error or UpstreamRequestError("Teacher schedule not found", status=404)
+
+    def _build_schedule_payload(
+        self,
+        query_value: str,
+    ) -> JsonValue:
+        return self._build_schedule_payload_for_request(student_group=query_value)
+
+    def _build_schedule_payload_for_request(
+        self,
+        *,
+        student_group: str | None = None,
+        teacher_url_id: str | None = None,
+        teacher_employee_id: str | None = None,
+        reference_date: date | None = None,
+        view: str = "week",
+    ) -> JsonValue:
+        today_value = self.today()
+        normalized_view = normalize_schedule_view(view)
+
+        if student_group is not None:
+            schedule_payload = self.request_upstream(
+                "/schedule",
+                {"studentGroup": student_group},
+            )
+        elif teacher_url_id is not None:
+            schedule_payload = self._request_teacher_schedule(
+                teacher_url_id,
+                teacher_employee_id,
+            )
+        else:
+            raise UpstreamRequestError(
+                "Either studentGroup or teacherUrlId is required",
+                status=400,
+            )
+
         return normalize_schedule_response(
             schedule_payload,
-            current_week,
-            self.today(),
+            self._fetch_current_week(),
+            today_value,
+            reference_date=reference_date or today_value,
+            view=normalized_view,
+        )
+
+    def _build_free_auditories_payload(
+        self,
+        *,
+        query_value: str,
+        student_group: str | None = None,
+        teacher_url_id: str | None = None,
+        teacher_employee_id: str | None = None,
+    ) -> JsonValue:
+        schedule_payload = self._build_schedule_payload_for_request(
+            student_group=student_group,
+            teacher_url_id=teacher_url_id,
+            teacher_employee_id=teacher_employee_id,
+            reference_date=self.today(),
+            view="week",
+        )
+        auditories_payload = self.request_upstream("/auditories", {})
+        now_value = datetime.fromtimestamp(self.now_ms() / 1000)
+        return normalize_free_auditories_response(
+            auditories_payload,
+            schedule_payload,
+            query_value,
+            now_value,
         )
 
     def _build_employees_payload(self, query_value: str) -> JsonValue:
@@ -1204,6 +1646,180 @@ class BackendApp:
 
         return normalized
 
+    def _serve_cached_payload(
+        self,
+        cache_key_value: str,
+        builder: Callable[[], JsonValue],
+    ) -> Response:
+        now_value = self.now_ms()
+        cached = self._read_fresh_cache(cache_key_value, now_value)
+
+        if cached is not None:
+            return Response(200, cached)
+
+        inflight_request, is_leader = self._get_or_create_inflight_request(
+            cache_key_value
+        )
+
+        if not is_leader:
+            try:
+                return Response(200, inflight_request.result())
+            except UpstreamRequestError as error:
+                return self._upstream_error_response(error)
+
+        try:
+            payload = builder()
+            self._write_cached_payload(cache_key_value, payload)
+            inflight_request.set_result(payload)
+            return Response(200, payload)
+        except UpstreamRequestError as error:
+            stale_payload = self._read_stale_cache(
+                cache_key_value,
+                self.now_ms(),
+            )
+
+            if stale_payload is not None:
+                inflight_request.set_result(stale_payload)
+                return Response(200, stale_payload)
+
+            inflight_request.set_exception(error)
+            return self._upstream_error_response(error)
+        except Exception as error:
+            inflight_request.set_exception(error)
+            raise
+        finally:
+            self._clear_inflight_request(cache_key_value, inflight_request)
+
+    def _handle_profile_request(
+        self,
+        method: str,
+        parsed_url: Any,
+        body: bytes | None,
+    ) -> Response:
+        if method == "GET":
+            telegram_user_id = first_query_value(parsed_url, "telegramUserId")
+            if telegram_user_id is None:
+                return Response(
+                    400,
+                    {"error": 'Query param "telegramUserId" is required'},
+                )
+
+            profile = self.profile_store.get(telegram_user_id)
+            if profile is None:
+                return Response(404, {"error": "Profile not found"})
+
+            return Response(200, profile.to_dict())
+
+        if method in {"PUT", "POST"}:
+            try:
+                payload = parse_json_request_body(body)
+                profile = UserProfile.from_payload(payload)
+            except ProfileValidationError as error:
+                return Response(400, {"error": error.message})
+
+            return Response(200, self.profile_store.upsert(profile).to_dict())
+
+        if method == "DELETE":
+            telegram_user_id = first_query_value(parsed_url, "telegramUserId")
+            if telegram_user_id is None:
+                return Response(
+                    400,
+                    {"error": 'Query param "telegramUserId" is required'},
+                )
+
+            self.profile_store.delete(telegram_user_id)
+            return Response(200, {"ok": True})
+
+        return Response(405, {"error": "Method not allowed"})
+
+    def _handle_schedule_request(self, parsed_url: Any) -> Response:
+        student_group = first_query_value(parsed_url, "studentGroup")
+        teacher_url_id = first_query_value(parsed_url, "teacherUrlId", "urlId")
+        teacher_employee_id = first_query_value(
+            parsed_url,
+            "teacherEmployeeId",
+            "employeeId",
+        )
+
+        if student_group is None and teacher_url_id is None:
+            return Response(
+                400,
+                {
+                    "error": 'Query param "studentGroup" or "teacherUrlId" is required'
+                },
+            )
+
+        view = normalize_schedule_view(first_query_value(parsed_url, "view") or "week")
+        reference_date = parse_iso_date(first_query_value(parsed_url, "date")) or self.today()
+        params = {
+            "studentGroup": student_group or "",
+            "teacherUrlId": teacher_url_id or "",
+            "teacherEmployeeId": teacher_employee_id or "",
+            "view": view,
+            "date": reference_date.isoformat(),
+        }
+        key = cache_key("/schedule", params)
+
+        return self._serve_cached_payload(
+            key,
+            lambda: self._build_schedule_payload_for_request(
+                student_group=student_group,
+                teacher_url_id=teacher_url_id,
+                teacher_employee_id=teacher_employee_id,
+                reference_date=reference_date,
+                view=view,
+            ),
+        )
+
+    def _handle_employee_search_request(self, parsed_url: Any) -> Response:
+        query_value = first_query_value(parsed_url, "query", "q")
+        if query_value is None or len(query_value) < 2:
+            return Response(
+                400,
+                {"error": 'Query param "query" is required'},
+            )
+
+        key = cache_key("/employees", {"query": query_value})
+        return self._serve_cached_payload(
+            key,
+            lambda: self._build_employees_payload(query_value),
+        )
+
+    def _handle_free_auditories_request(self, parsed_url: Any) -> Response:
+        query_value = first_query_value(parsed_url, "query", "q") or ""
+        student_group = first_query_value(parsed_url, "studentGroup")
+        teacher_url_id = first_query_value(parsed_url, "teacherUrlId", "urlId")
+        teacher_employee_id = first_query_value(
+            parsed_url,
+            "teacherEmployeeId",
+            "employeeId",
+        )
+
+        if student_group is None and teacher_url_id is None:
+            return Response(
+                400,
+                {
+                    "error": 'Query param "studentGroup" or "teacherUrlId" is required'
+                },
+            )
+
+        params = {
+            "query": query_value,
+            "studentGroup": student_group or "",
+            "teacherUrlId": teacher_url_id or "",
+            "teacherEmployeeId": teacher_employee_id or "",
+        }
+        key = cache_key("/free-auditories", params)
+        return self._serve_cached_payload(
+            key,
+            lambda: self._build_free_auditories_payload(
+                query_value=query_value,
+                student_group=student_group,
+                teacher_url_id=teacher_url_id,
+                teacher_employee_id=teacher_employee_id,
+            ),
+        )
+
     def _handle_telegram_webhook(
         self,
         body: bytes,
@@ -1304,6 +1920,9 @@ class BackendApp:
 
             return self._handle_telegram_webhook(body or b"", headers)
 
+        if parsed_url.path == "/api/profile":
+            return self._handle_profile_request(method, parsed_url, body)
+
         if method not in {"GET", "HEAD"}:
             return Response(405, {"error": "Method not allowed"})
 
@@ -1332,6 +1951,15 @@ class BackendApp:
                 },
             )
 
+        if parsed_url.path == "/api/schedule":
+            return self._handle_schedule_request(parsed_url)
+
+        if parsed_url.path in {"/api/search-employee", "/api/employees"}:
+            return self._handle_employee_search_request(parsed_url)
+
+        if parsed_url.path == "/api/free-auditories":
+            return self._handle_free_auditories_request(parsed_url)
+
         route = route_config(parsed_url.path)
 
         if route is None:
@@ -1347,44 +1975,15 @@ class BackendApp:
 
         params = {route.query_param: normalized}
         key = cache_key(route.cache_namespace, params)
-        now_value = self.now_ms()
-        cached = self._read_fresh_cache(key, now_value)
-
-        if cached is not None:
-            return Response(200, cached)
-
-        inflight_request, is_leader = self._get_or_create_inflight_request(key)
-
-        if not is_leader:
-            try:
-                return Response(200, inflight_request.result())
-            except UpstreamRequestError as error:
-                return self._upstream_error_response(error)
-
-        try:
-            payload = self.build_route_payload(route, normalized)
-            self._write_cached_payload(key, payload)
-            inflight_request.set_result(payload)
-            return Response(200, payload)
-        except UpstreamRequestError as error:
-            stale_payload = self._read_stale_cache(key, self.now_ms())
-
-            if stale_payload is not None:
-                inflight_request.set_result(stale_payload)
-                return Response(200, stale_payload)
-
-            inflight_request.set_exception(error)
-            return self._upstream_error_response(error)
-        except Exception as error:
-            inflight_request.set_exception(error)
-            raise
-        finally:
-            self._clear_inflight_request(key, inflight_request)
+        return self._serve_cached_payload(
+            key,
+            lambda: self.build_route_payload(route, normalized),
+        )
 
 
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
 }
 

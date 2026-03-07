@@ -1,7 +1,8 @@
 import asyncio
 import json
 import unittest
-from datetime import date
+from datetime import date, datetime
+from pathlib import Path
 from threading import Event, Lock, Thread
 
 from backend.server import (
@@ -21,6 +22,7 @@ from backend.server import (
     route_config,
     write_cache,
 )
+from backend.user_profiles import UserProfileStore
 
 
 TEST_CONFIG = {
@@ -235,18 +237,34 @@ class BackendServerTests(unittest.TestCase):
         response = app.handle_request("HEAD", "/api/schedule?studentGroup=353502")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.payload, {"days": []})
+        self.assertEqual(response.payload["days"], [])
+        self.assertEqual(response.payload["view"], "week")
 
     def test_serves_fresh_cache_without_calling_upstream(self) -> None:
         fetch_count = {"value": 0}
         store: dict[str, CacheEntry] = {}
         now_ms = lambda: 1_000
-        key = cache_key("/schedule", {"studentGroup": "353502"})
+        today = lambda: date(2026, 3, 4)
+        key = cache_key(
+            "/schedule",
+            {
+                "studentGroup": "353502",
+                "teacherUrlId": "",
+                "teacherEmployeeId": "",
+                "view": "week",
+                "date": "2026-03-04",
+            },
+        )
 
         write_cache(
             store,
             key,
-            {"days": [{"date": "2026-01-01", "lessons": []}]},
+            {
+                "view": "week",
+                "rangeStart": "2026-03-02",
+                "rangeEnd": "2026-03-08",
+                "days": [{"date": "2026-01-01", "lessons": []}],
+            },
             60_000,
             120_000,
             now_ms(),
@@ -261,6 +279,7 @@ class BackendServerTests(unittest.TestCase):
             store=store,
             fetcher=fetcher,
             now_ms=now_ms,
+            today=today,
         )
 
         response = app.handle_request("GET", "/api/schedule?studentGroup=353502")
@@ -269,7 +288,12 @@ class BackendServerTests(unittest.TestCase):
         self.assertEqual(fetch_count["value"], 0)
         self.assertEqual(
             response.payload,
-            {"days": [{"date": "2026-01-01", "lessons": []}]},
+            {
+                "view": "week",
+                "rangeStart": "2026-03-02",
+                "rangeEnd": "2026-03-08",
+                "days": [{"date": "2026-01-01", "lessons": []}],
+            },
         )
 
     def test_returns_stale_cache_when_upstream_fails(self) -> None:
@@ -439,12 +463,13 @@ class BackendServerTests(unittest.TestCase):
 
         normalized = normalize_schedule_response(payload, 3, date(2026, 3, 4))
 
-        self.assertEqual(len(normalized["days"]), 6)
+        self.assertEqual(len(normalized["days"]), 7)
         monday = normalized["days"][0]
         self.assertEqual(monday["date"], "2026-03-02")
         self.assertEqual(len(monday["lessons"]), 1)
         self.assertEqual(monday["lessons"][0]["subject"], "Higher Math")
         self.assertEqual(monday["lessons"][0]["teacher"], "Ivanov Ivan Ivanovich")
+        self.assertEqual(monday["lessons"][0]["typeKey"], "lecture")
 
     def test_schedule_route_returns_frontend_contract(self) -> None:
         def fetcher(path: str, _params: dict[str, str]):
@@ -478,7 +503,7 @@ class BackendServerTests(unittest.TestCase):
         response = app.handle_request("GET", "/api/schedule?studentGroup=353502")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.payload["days"]), 6)
+        self.assertEqual(len(response.payload["days"]), 7)
         monday = response.payload["days"][0]
         lesson = monday["lessons"][0]
         self.assertEqual(monday["date"], "2026-03-02")
@@ -505,6 +530,8 @@ class BackendServerTests(unittest.TestCase):
 
         self.assertEqual(len(normalized), 1)
         self.assertEqual(normalized[0]["fullName"], "Ivanov I. I.")
+        self.assertEqual(normalized[0]["employeeId"], "42")
+        self.assertEqual(normalized[0]["urlId"], "42")
         self.assertEqual(normalized[0]["department"], "POIT")
         self.assertEqual(
             normalized[0]["avatarUrl"],
@@ -539,6 +566,8 @@ class BackendServerTests(unittest.TestCase):
             [
                 {
                     "id": "7",
+                    "employeeId": "7",
+                    "urlId": "7",
                     "fullName": "Петров Пётр Петрович",
                     "position": "Доцент",
                     "department": "СиСИ",
@@ -837,6 +866,177 @@ class BackendServerTests(unittest.TestCase):
             response.payload["error"],
             "По данному студенческому билету ничего не найдено",
         )
+
+
+    def test_search_employee_alias_uses_query_param(self) -> None:
+        def fetcher(path: str, _params: dict[str, str]):
+            if path == "/employees/fio":
+                return {
+                    "value": [
+                        {
+                            "id": 15,
+                            "urlId": "petrov-p-p",
+                            "fio": "Petrov P. P.",
+                        }
+                    ]
+                }
+
+            raise AssertionError(f"Unexpected path: {path}")
+
+        app = BackendApp(config=TEST_CONFIG, fetcher=fetcher)
+
+        response = app.handle_request(
+            "GET",
+            "/api/search-employee?query=pe",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.payload[0]["employeeId"], "15")
+        self.assertEqual(response.payload[0]["urlId"], "petrov-p-p")
+
+    def test_teacher_schedule_route_uses_teacher_url_id(self) -> None:
+        seen_paths: list[str] = []
+
+        def fetcher(path: str, _params: dict[str, str]):
+            seen_paths.append(path)
+            if path == "/employees/schedule/petrov-p-p":
+                return {
+                    "schedules": {
+                        "\u041f\u043e\u043d\u0435\u0434\u0435\u043b\u044c\u043d\u0438\u043a": [
+                            {
+                                "subjectFullName": "Discrete Math",
+                                "startLessonTime": "09:00",
+                                "endLessonTime": "10:20",
+                                "lessonTypeAbbrev": "\u041b\u041a",
+                                "auditories": ["101-1"],
+                            }
+                        ]
+                    }
+                }
+            if path == "/schedule/current-week":
+                return 3
+
+            raise AssertionError(f"Unexpected path: {path}")
+
+        app = BackendApp(
+            config=TEST_CONFIG,
+            fetcher=fetcher,
+            today=lambda: date(2026, 3, 2),
+        )
+
+        response = app.handle_request(
+            "GET",
+            "/api/schedule?teacherUrlId=petrov-p-p&view=day&date=2026-03-02",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.payload["view"], "day")
+        self.assertEqual(len(response.payload["days"]), 1)
+        self.assertEqual(
+            response.payload["days"][0]["lessons"][0]["subject"],
+            "Discrete Math",
+        )
+        self.assertCountEqual(
+            seen_paths,
+            ["/employees/schedule/petrov-p-p", "/schedule/current-week"],
+        )
+
+    def test_profile_route_supports_put_get_and_delete(self) -> None:
+        store_path = Path("backend") / "_profile_store_test.json"
+        store_path.unlink(missing_ok=True)
+        try:
+            app = BackendApp(
+                config=TEST_CONFIG,
+                fetcher=lambda *_: {},
+                profile_store=UserProfileStore(store_path),
+            )
+            payload = {
+                "telegramUserId": "tg:42",
+                "role": "teacher",
+                "employeeId": "15",
+                "urlId": "petrov-p-p",
+                "fullName": "Petrov P. P.",
+            }
+
+            created = app.handle_request(
+                "PUT",
+                "/api/profile",
+                body=json.dumps(payload).encode("utf-8"),
+            )
+            fetched = app.handle_request(
+                "GET",
+                "/api/profile?telegramUserId=tg:42",
+            )
+            deleted = app.handle_request(
+                "DELETE",
+                "/api/profile?telegramUserId=tg:42",
+            )
+            missing = app.handle_request(
+                "GET",
+                "/api/profile?telegramUserId=tg:42",
+            )
+
+            self.assertEqual(created.status_code, 200)
+            self.assertEqual(created.payload["role"], "teacher")
+            self.assertEqual(fetched.status_code, 200)
+            self.assertEqual(fetched.payload["fullName"], "Petrov P. P.")
+            self.assertEqual(deleted.status_code, 200)
+            self.assertEqual(deleted.payload, {"ok": True})
+            self.assertEqual(missing.status_code, 404)
+        finally:
+            store_path.unlink(missing_ok=True)
+
+    def test_free_auditories_route_filters_busy_room(self) -> None:
+        now_value = datetime(2026, 3, 2, 10, 10)
+
+        def fetcher(path: str, _params: dict[str, str]):
+            if path == "/schedule":
+                return {
+                    "schedules": {
+                        "\u041f\u043e\u043d\u0435\u0434\u0435\u043b\u044c\u043d\u0438\u043a": [
+                            {
+                                "subjectFullName": "Physics",
+                                "startLessonTime": "10:05",
+                                "endLessonTime": "11:30",
+                                "lessonTypeAbbrev": "\u041b\u0420",
+                                "auditories": ["303-3\u043a"],
+                            }
+                        ]
+                    }
+                }
+            if path == "/schedule/current-week":
+                return 3
+            if path == "/auditories":
+                return [
+                    {
+                        "id": 214,
+                        "name": "303",
+                        "buildingNumber": {"name": "3 \u043a."},
+                    },
+                    {
+                        "id": 215,
+                        "name": "101",
+                        "buildingNumber": {"name": "1 \u043a."},
+                    },
+                ]
+
+            raise AssertionError(f"Unexpected path: {path}")
+
+        app = BackendApp(
+            config=TEST_CONFIG,
+            fetcher=fetcher,
+            now_ms=lambda: int(now_value.timestamp() * 1000),
+            today=lambda: date(2026, 3, 2),
+        )
+
+        response = app.handle_request(
+            "GET",
+            "/api/free-auditories?studentGroup=353502",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.payload["items"]), 1)
+        self.assertEqual(response.payload["items"][0]["name"], "101")
 
 
 if __name__ == "__main__":

@@ -23,31 +23,25 @@ const TeacherCard = memo(({ employee }: TeacherCardProps) => (
   <article className="univer-teacher-card">
     <div className="univer-teacher-avatar">
       {employee.avatarUrl ? (
-        <img
-          src={employee.avatarUrl}
-          alt={`Фото ${employee.fullName}`}
-        />
+        <img src={employee.avatarUrl} alt={`???? ${employee.fullName}`} />
       ) : (
         <span className="univer-teacher-initials">
           {getInitials(employee.fullName)}
         </span>
       )}
     </div>
+
     <div className="univer-teacher-content">
-      <h3 className="univer-teacher-name">
-        {employee.fullName}
-      </h3>
+      <h3 className="univer-teacher-name">{employee.fullName}</h3>
+
       <div className="univer-teacher-meta">
         {employee.position && (
-          <span className="univer-teacher-text">
-            {employee.position}
-          </span>
+          <span className="univer-teacher-text">{employee.position}</span>
         )}
         {employee.department && (
-          <span className="univer-teacher-pill">
-            {employee.department}
-          </span>
+          <span className="univer-teacher-pill">{employee.department}</span>
         )}
+        <span className="univer-teacher-pill">ID {employee.employeeId}</span>
       </div>
     </div>
   </article>
@@ -70,7 +64,7 @@ export const TeacherResults = ({
     return (
       <UniversityActionCard
         text={error}
-        actionLabel="Повторить попытку"
+        actionLabel="????????? ?????"
         onAction={onRetry}
       />
     )
@@ -82,24 +76,21 @@ export const TeacherResults = ({
         teachers.length > 0 ? (
           <div className="univer-results-list">
             {teachers.map((employee) => (
-              <TeacherCard
-                key={employee.id}
-                employee={employee}
-              />
+              <TeacherCard key={employee.id} employee={employee} />
             ))}
           </div>
         ) : (
           <UniversityTextCard
             className="univer-empty-card"
-            title="Ничего не найдено"
-            subtitle="Попробуйте изменить запрос или проверить написание фамилии."
+            title="?????? ?? ???????"
+            subtitle="?????????? ???????? ??????? ??? ?????? ???????? ? ?????? ???????."
           />
         )
       ) : (
         <UniversityTextCard
           className="univer-helper-card"
-          title="Начните с поиска"
-          subtitle="Введите фамилию или часть названия кафедры, чтобы увидеть список преподавателей."
+          title="??????? ????? ?????????????"
+          subtitle="??????? ??????? ??? ????? ???, ????? backend ????? ??????????? ????? ????? IIS API."
         />
       )}
     </section>

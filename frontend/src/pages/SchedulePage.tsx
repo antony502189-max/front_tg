@@ -5,188 +5,397 @@ import {
   useMemo,
   useState,
 } from 'react'
-import { fetchStudentSchedule } from '../api/schedule'
-import { CalendarStrip } from '../components/schedule/CalendarStrip'
-import { LessonCard } from '../components/schedule/LessonCard'
-import { useAsyncResource } from '../hooks/useAsyncResource'
-import {
-  selectLessonsForDate,
-  useScheduleStore,
-  type Lesson,
-} from '../store/scheduleStore'
-import { useUserStore } from '../store/userStore'
-import { buildDateTime, toDateKey } from '../utils/date'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
-import type { WeekSchedule } from '../api/schedule'
+import {
+  fetchSchedule,
+  type ScheduleResponse,
+  type ScheduleViewMode,
+} from '../api/schedule'
+import { getApiErrorMessage } from '../api/client'
+import {
+  LessonCard,
+  type LessonCardStatus,
+} from '../components/schedule/LessonCard'
+import { useAsyncResource } from '../hooks/useAsyncResource'
+import { useScheduleStore, type Lesson } from '../store/scheduleStore'
+import { useUserStore } from '../store/userStore'
+import { buildDateTime, parseDateKey, toDateKey } from '../utils/date'
 
-const findCurrentAndNextLesson = (
-  date: string,
-  lessons: Lesson[],
-  todayKey: string,
-): { currentId: string | null; nextId: string | null } => {
-  if (!lessons.length || date !== todayKey) {
-    return { currentId: null, nextId: null }
+const VIEW_OPTIONS: Array<{
+  value: ScheduleViewMode
+  label: string
+}> = [
+  { value: 'day', label: '????' },
+  { value: 'week', label: '??????' },
+  { value: 'month', label: '?????' },
+]
+
+const dayFormatter = new Intl.DateTimeFormat('ru-RU', {
+  weekday: 'long',
+  day: 'numeric',
+  month: 'long',
+})
+
+const rangeFormatter = new Intl.DateTimeFormat('ru-RU', {
+  day: 'numeric',
+  month: 'short',
+})
+
+type ScheduleDayView = {
+  date: string
+  lessons: Array<
+    Lesson & {
+      status: LessonCardStatus
+    }
+  >
+}
+
+const LESSON_COUNT_LABELS: Record<number, string> = {
+  1: '???????',
+  2: '???????',
+  3: '???????',
+  4: '???????',
+}
+
+const shiftDateKey = (
+  dateKey: string,
+  view: ScheduleViewMode,
+  direction: -1 | 1,
+) => {
+  const parsed = parseDateKey(dateKey) ?? new Date()
+  const nextDate = new Date(parsed)
+
+  if (view === 'day') {
+    nextDate.setDate(nextDate.getDate() + direction)
+  } else if (view === 'week') {
+    nextDate.setDate(nextDate.getDate() + direction * 7)
+  } else {
+    nextDate.setMonth(nextDate.getMonth() + direction)
   }
 
-  const now = new Date()
+  return toDateKey(nextDate)
+}
 
-  let currentId: string | null = null
-  let nextId: string | null = null
-
-  for (const lesson of lessons) {
-    const start = buildDateTime(date, lesson.startTime)
-    const end = buildDateTime(date, lesson.endTime)
-
-    if (!start || !end) {
-      continue
-    }
-
-    if (now >= start && now <= end) {
-      currentId = lesson.id
-      break
-    }
-
-    if (now < start) {
-      nextId = lesson.id
-      break
-    }
+const formatScheduleDate = (dateKey: string) => {
+  const parsed = parseDateKey(dateKey)
+  if (!parsed) {
+    return dateKey
   }
 
-  return { currentId, nextId }
+  const formatted = dayFormatter.format(parsed)
+  return formatted.charAt(0).toUpperCase() + formatted.slice(1)
+}
+
+const formatScheduleRange = (
+  rangeStart: string,
+  rangeEnd: string,
+  view: ScheduleViewMode,
+) => {
+  if (view === 'day') {
+    return formatScheduleDate(rangeStart)
+  }
+
+  const start = parseDateKey(rangeStart)
+  const end = parseDateKey(rangeEnd)
+
+  if (!start || !end) {
+    return `${rangeStart} - ${rangeEnd}`
+  }
+
+  return `${rangeFormatter.format(start)} - ${rangeFormatter.format(end)}`
+}
+
+const getLessonCountLabel = (count: number) => {
+  const remainder100 = count % 100
+  if (remainder100 >= 11 && remainder100 <= 14) {
+    return '???????'
+  }
+
+  return LESSON_COUNT_LABELS[count % 10] ?? '???????'
+}
+
+const getLessonStatus = (
+  lesson: Lesson,
+  now: Date,
+): LessonCardStatus => {
+  const start = buildDateTime(lesson.date, lesson.startTime)
+  const end = buildDateTime(lesson.date, lesson.endTime)
+
+  if (!start || !end) {
+    return 'upcoming'
+  }
+
+  if (now > end) {
+    return 'past'
+  }
+
+  if (now >= start && now <= end) {
+    return 'current'
+  }
+
+  return 'upcoming'
 }
 
 export const SchedulePage = () => {
-  const groupNumber = useUserStore((state) => state.groupNumber)
-  const normalizedGroupNumber = groupNumber?.trim() ?? ''
-  const { calendarDays, setSchedule, clearSchedule } =
-    useScheduleStore(
-      useShallow((state) => ({
-        calendarDays: state.days,
-        setSchedule: state.setSchedule,
-        clearSchedule: state.clearSchedule,
-      })),
-    )
+  const { role, groupNumber, urlId, employeeId, fullName } = useUserStore(
+    useShallow((state) => ({
+      role: state.role,
+      groupNumber: state.groupNumber,
+      urlId: state.urlId,
+      employeeId: state.employeeId,
+      fullName: state.fullName,
+    })),
+  )
+  const { setSchedule, clearSchedule } = useScheduleStore(
+    useShallow((state) => ({
+      setSchedule: state.setSchedule,
+      clearSchedule: state.clearSchedule,
+    })),
+  )
 
-  const [selectedDate, setSelectedDate] = useState<string>(() =>
+  const [view, setView] = useState<ScheduleViewMode>('week')
+  const [referenceDate, setReferenceDate] = useState(() =>
     toDateKey(new Date()),
   )
-  const lessonsSelector = useMemo(
-    () => selectLessonsForDate(selectedDate),
-    [selectedDate],
-  )
-  const lessonsForSelectedDate = useScheduleStore(lessonsSelector)
-  const hasGroup = normalizedGroupNumber.length > 0
-  const requestKey = hasGroup ? normalizedGroupNumber : null
+
+  const todayKey = toDateKey(new Date())
+  const normalizedGroupNumber = groupNumber.trim()
+  const normalizedTeacherUrlId = urlId.trim()
+  const normalizedTeacherEmployeeId = employeeId.trim()
+  const hasIdentity =
+    role === 'teacher'
+      ? normalizedTeacherUrlId.length > 0
+      : normalizedGroupNumber.length > 0
+
+  const requestKey =
+    role && hasIdentity
+      ? [
+          role,
+          role === 'teacher'
+            ? normalizedTeacherUrlId
+            : normalizedGroupNumber,
+          view,
+          referenceDate,
+        ].join(':')
+      : null
+
   const loadSchedule = useCallback(
-    (signal: AbortSignal) =>
-      fetchStudentSchedule(normalizedGroupNumber, signal),
-    [normalizedGroupNumber],
+    (signal: AbortSignal) => {
+      if (!role) {
+        return Promise.resolve<ScheduleResponse>({
+          view,
+          rangeStart: referenceDate,
+          rangeEnd: referenceDate,
+          days: [],
+        })
+      }
+
+      return fetchSchedule(
+        {
+          role,
+          date: referenceDate,
+          view,
+          groupNumber: normalizedGroupNumber,
+          teacherUrlId: normalizedTeacherUrlId,
+          teacherEmployeeId: normalizedTeacherEmployeeId,
+        },
+        signal,
+      )
+    },
+    [
+      normalizedGroupNumber,
+      normalizedTeacherEmployeeId,
+      normalizedTeacherUrlId,
+      referenceDate,
+      role,
+      view,
+    ],
   )
-  const mapScheduleError = useCallback(
-    () => 'Не удалось загрузить расписание.',
-    [],
-  )
+
   const {
     data,
     error,
     isLoading,
-    reload,
     hasResolvedCurrentRequest,
-  } = useAsyncResource<WeekSchedule | null>({
-    enabled: hasGroup,
+    reload,
+  } = useAsyncResource<ScheduleResponse | null>({
+    enabled: hasIdentity && role !== null,
     requestKey,
     initialData: null,
     load: loadSchedule,
-    getErrorMessage: mapScheduleError,
+    getErrorMessage: (requestError) =>
+      getApiErrorMessage(
+        requestError,
+        '?? ??????? ????????? ??????????. ?????????? ??? ???.',
+      ),
   })
 
   useEffect(() => {
-    if (!hasGroup) {
+    if (!hasIdentity) {
       clearSchedule()
-      return
     }
-
-    clearSchedule()
-  }, [clearSchedule, hasGroup, requestKey])
+  }, [clearSchedule, hasIdentity])
 
   useEffect(() => {
-    if (!hasGroup || !hasResolvedCurrentRequest) {
-      return
-    }
-
-    if (!data) {
-      clearSchedule()
+    if (!hasResolvedCurrentRequest || !data) {
       return
     }
 
     startTransition(() => {
       setSchedule(data.days)
-      setSelectedDate((currentSelectedDate) => {
-        if (
-          data.days.some(
-            (day) => day.date === currentSelectedDate,
-          ) ||
-          data.days.length === 0
-        ) {
-          return currentSelectedDate
-        }
-
-        return data.days[0]?.date ?? currentSelectedDate
-      })
     })
-  }, [
-    clearSchedule,
-    data,
-    hasGroup,
-    hasResolvedCurrentRequest,
-    setSchedule,
-  ])
+  }, [data, hasResolvedCurrentRequest, setSchedule])
 
-  const todayKey = toDateKey(new Date())
+  const displayError = useMemo(() => {
+    if (error) {
+      return error
+    }
 
-  const { currentId, nextId } = useMemo(
-    () =>
-      findCurrentAndNextLesson(
-        selectedDate,
-        lessonsForSelectedDate,
-        todayKey,
-      ),
-    [lessonsForSelectedDate, selectedDate, todayKey],
+    if (role === 'teacher' && !normalizedTeacherUrlId) {
+      return '??????? ???????? ????????????? ? ???????, ????? ????????? ???????????? ??????????.'
+    }
+
+    if (role !== 'teacher' && !normalizedGroupNumber) {
+      return '???????? ??????? ?????? ? ???????, ????? ????????? ??????????.'
+    }
+
+    return null
+  }, [error, normalizedGroupNumber, normalizedTeacherUrlId, role])
+
+  const rawDays = data?.days
+  const visibleDays = useMemo<ScheduleDayView[]>(() => {
+    const days = rawDays ?? []
+    const now = new Date()
+    const mappedDays = days.map((day) => ({
+      date: day.date,
+      lessons: day.lessons.map((lesson) => ({
+        ...lesson,
+        status: getLessonStatus(lesson, now),
+      })),
+    }))
+
+    if (view === 'day') {
+      return mappedDays
+    }
+
+    return mappedDays.filter((day) => day.lessons.length > 0)
+  }, [rawDays, view])
+
+  const hasLessons = visibleDays.some((day) => day.lessons.length > 0)
+  const rangeLabel = formatScheduleRange(
+    data?.rangeStart ?? referenceDate,
+    data?.rangeEnd ?? referenceDate,
+    view,
   )
-
-  const handleSelectDate = (date: string) => {
-    setSelectedDate(date)
-  }
-
-  const displayError = hasGroup
-    ? error
-    : 'Добавьте учебную группу в настройках, чтобы видеть расписание.'
-  const visibleLessons = hasGroup ? lessonsForSelectedDate : []
-  const hasLessons = visibleLessons.length > 0
+  const identityLabel =
+    role === 'teacher'
+      ? fullName.trim() || '??????? ?????????????'
+      : normalizedGroupNumber
+        ? `?????? ${normalizedGroupNumber}`
+        : '??????? ????????'
 
   return (
     <div className="planner-page">
-      <div className="schedule-inner">
-        <header className="schedule-header">
+      <div className="schedule-inner schedule-inner--modern">
+        <header className="schedule-header schedule-header--modern">
           <div>
-            <h1 className="planner-title">Расписание</h1>
+            <span className="schedule-kicker">
+              {role === 'teacher' ? '?????????????' : '???????'}
+            </span>
+            <h1 className="planner-title">??????????</h1>
             <p className="planner-subtitle">
-              Смотрите пары на выбранный день и текущую
-              неделю.
+              {role === 'teacher'
+                ? '??????? ???????????? ????? backend ?? urlId ?????????????.'
+                : '??????? ???????????? ????? backend ?? ?????? ??????? ??????.'}
             </p>
+          </div>
+
+          <div className="schedule-identity-card">
+            <span className="schedule-identity-label">????????</span>
+            <strong className="schedule-identity-value">{identityLabel}</strong>
           </div>
         </header>
 
-        {calendarDays.length > 0 && (
-          <CalendarStrip
-            days={calendarDays}
-            selectedDate={selectedDate}
-            onSelectDate={handleSelectDate}
-          />
-        )}
+        <section className="schedule-toolbar">
+          <div className="schedule-view-toggle" role="tablist">
+            {VIEW_OPTIONS.map((option) => {
+              const isActive = view === option.value
+
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  className={`schedule-view-chip${
+                    isActive ? ' schedule-view-chip--active' : ''
+                  }`}
+                  onClick={() => {
+                    if (option.value === view) {
+                      return
+                    }
+
+                    startTransition(() => {
+                      setView(option.value)
+                    })
+                  }}
+                >
+                  {option.label}
+                </button>
+              )
+            })}
+          </div>
+
+          <div className="schedule-period-bar">
+            <button
+              type="button"
+              className="schedule-period-button"
+              onClick={() =>
+                setReferenceDate(shiftDateKey(referenceDate, view, -1))
+              }
+              aria-label="?????????? ??????"
+            >
+              <ChevronLeft size={18} />
+            </button>
+
+            <div className="schedule-period-copy">
+              <span className="schedule-period-label">
+                {view === 'day'
+                  ? '????????? ????'
+                  : view === 'week'
+                    ? '??????? ????????'
+                    : '??????? ?????'}
+              </span>
+              <strong className="schedule-period-value">{rangeLabel}</strong>
+            </div>
+
+            <button
+              type="button"
+              className="schedule-period-button"
+              onClick={() =>
+                setReferenceDate(shiftDateKey(referenceDate, view, 1))
+              }
+              aria-label="????????? ??????"
+            >
+              <ChevronRight size={18} />
+            </button>
+          </div>
+
+          {referenceDate !== todayKey && (
+            <button
+              type="button"
+              className="schedule-today-button"
+              onClick={() => setReferenceDate(todayKey)}
+            >
+              ???????
+            </button>
+          )}
+        </section>
 
         {isLoading && (
           <div className="schedule-skeleton-list">
+            <div className="schedule-skeleton-card" />
             <div className="schedule-skeleton-card" />
             <div className="schedule-skeleton-card" />
           </div>
@@ -195,44 +404,52 @@ export const SchedulePage = () => {
         {!isLoading && displayError && (
           <div className="schedule-error-card">
             <p className="schedule-error-text">{displayError}</p>
-            {hasGroup && (
+            {hasIdentity && (
               <button
                 type="button"
                 className="schedule-retry-button"
                 onClick={reload}
               >
-                Повторить попытку
+                ????????? ??????
               </button>
             )}
           </div>
         )}
 
         {!isLoading && !displayError && (
-          <section className="schedule-lessons-section">
-            <h2 className="schedule-section-title">
-              {selectedDate === todayKey
-                ? 'Занятия на сегодня'
-                : 'Занятия на выбранный день'}
-            </h2>
-
+          <section className="schedule-day-groups">
             {hasLessons ? (
-              <div className="schedule-lessons-list">
-                {visibleLessons.map((lesson) => (
-                  <LessonCard
-                    key={lesson.id}
-                    lesson={lesson}
-                    isCurrent={lesson.id === currentId}
-                    isNext={lesson.id === nextId}
-                  />
-                ))}
-              </div>
+              visibleDays.map((day) => (
+                <article key={day.date} className="schedule-day-section">
+                  <header className="schedule-day-section-header">
+                    <div>
+                      <h2 className="schedule-section-title">
+                        {formatScheduleDate(day.date)}
+                      </h2>
+                      <p className="schedule-day-section-subtitle">
+                        {day.date === todayKey
+                          ? '???????'
+                          : `${day.lessons.length} ${getLessonCountLabel(day.lessons.length)}`}
+                      </p>
+                    </div>
+                  </header>
+
+                  <div className="schedule-lessons-list">
+                    {day.lessons.map((lesson) => (
+                      <LessonCard
+                        key={lesson.id}
+                        lesson={lesson}
+                        status={lesson.status}
+                      />
+                    ))}
+                  </div>
+                </article>
+              ))
             ) : (
               <div className="schedule-empty-card">
-                <h3 className="schedule-empty-title">
-                  Пар нет
-                </h3>
+                <h2 className="schedule-empty-title">?????? ????????</h2>
                 <p className="schedule-empty-subtitle">
-                  На этот день занятий не запланировано.
+                  ?? ????????? ?????? ??????? ?? ???????.
                 </p>
               </div>
             )}

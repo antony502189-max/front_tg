@@ -290,6 +290,23 @@ export const apiGet = async <T>(
   return request
 }
 
+export const apiPut = async <TResponse, TBody>(
+  url: string,
+  data: TBody,
+  config: Omit<AxiosRequestConfig, 'url' | 'method' | 'data'> = {},
+): Promise<TResponse> => {
+  const response = await apiClient.put<TResponse>(url, data, config)
+  return response.data
+}
+
+export const apiDelete = async <TResponse>(
+  url: string,
+  config: Omit<AxiosRequestConfig, 'url' | 'method'> = {},
+): Promise<TResponse> => {
+  const response = await apiClient.delete<TResponse>(url, config)
+  return response.data
+}
+
 export const getApiErrorMessage = (
   error: unknown,
   fallback: string,

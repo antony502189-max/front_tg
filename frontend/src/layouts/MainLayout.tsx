@@ -1,9 +1,4 @@
 import type { ReactNode } from 'react'
-import {
-  useLocation,
-  useNavigate,
-  useOutlet,
-} from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   BookOpen,
@@ -12,6 +7,11 @@ import {
   LayoutGrid,
   Settings2,
 } from 'lucide-react'
+import {
+  useLocation,
+  useNavigate,
+  useOutlet,
+} from 'react-router-dom'
 
 type TabConfig = {
   id: string
@@ -23,31 +23,31 @@ type TabConfig = {
 const TABS: TabConfig[] = [
   {
     id: 'planner',
-    label: 'Планер',
+    label: '??????',
     path: '/app/planner',
     icon: <LayoutGrid size={20} />,
   },
   {
     id: 'study',
-    label: 'Учёба',
+    label: '?????',
     path: '/app/study',
     icon: <BookOpen size={20} />,
   },
   {
     id: 'schedule',
-    label: 'Расписание',
+    label: '??????????',
     path: '/app/schedule',
     icon: <CalendarDays size={20} />,
   },
   {
     id: 'univer',
-    label: 'Универ',
+    label: '??????',
     path: '/app/univer',
     icon: <Building2 size={20} />,
   },
   {
     id: 'settings',
-    label: 'Настройки',
+    label: '?????????',
     path: '/app/settings',
     icon: <Settings2 size={20} />,
   },
@@ -59,9 +59,8 @@ export const MainLayout = () => {
   const outlet = useOutlet()
 
   const activeTabId =
-    TABS.find((tab) =>
-      location.pathname.startsWith(tab.path),
-    )?.id ?? 'planner'
+    TABS.find((tab) => location.pathname.startsWith(tab.path))?.id ??
+    'planner'
 
   return (
     <div className="main-layout">
@@ -101,12 +100,8 @@ export const MainLayout = () => {
                   }
                 }}
               >
-                <span className="bottom-nav-icon">
-                  {tab.icon}
-                </span>
-                <span className="bottom-nav-label">
-                  {tab.label}
-                </span>
+                <span className="bottom-nav-icon">{tab.icon}</span>
+                <span className="bottom-nav-label">{tab.label}</span>
               </button>
             )
           })}
@@ -115,4 +110,3 @@ export const MainLayout = () => {
     </div>
   )
 }
-

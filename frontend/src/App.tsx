@@ -1,4 +1,4 @@
-import {
+﻿import {
   Suspense,
   lazy,
   useEffect,
@@ -11,6 +11,8 @@ import {
   useLocation,
 } from 'react-router-dom'
 import { useTelegramTheme } from './hooks/useTelegramTheme'
+import { fetchUserProfile } from './api/profile'
+import { resolveSessionUserId } from './telegram/session'
 import { useUserStore } from './store/userStore'
 import { MainLayout } from './layouts/MainLayout'
 
@@ -55,7 +57,14 @@ type RequireOnboardedProps = {
 
 const RequireOnboarded = ({ children }: RequireOnboardedProps) => {
   const isOnboarded = useUserStore((state) => state.isOnboarded)
+  const isProfileBootstrapped = useUserStore(
+    (state) => state.isProfileBootstrapped,
+  )
   const location = useLocation()
+
+  if (!isProfileBootstrapped) {
+    return <RouteFallback />
+  }
 
   if (!isOnboarded) {
     return (
@@ -73,6 +82,15 @@ const RequireOnboarded = ({ children }: RequireOnboardedProps) => {
 function App() {
   const theme = useTelegramTheme()
   const isOnboarded = useUserStore((state) => state.isOnboarded)
+  const isProfileBootstrapped = useUserStore(
+    (state) => state.isProfileBootstrapped,
+  )
+  const applyUserProfile = useUserStore(
+    (state) => state.applyUserProfile,
+  )
+  const markProfileBootstrapped = useUserStore(
+    (state) => state.markProfileBootstrapped,
+  )
 
   useEffect(() => {
     const root = document.documentElement
@@ -95,6 +113,34 @@ function App() {
       theme.isDark ? 'dark' : 'light',
     )
   }, [theme])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    const sessionUserId = resolveSessionUserId()
+
+    void fetchUserProfile(sessionUserId, controller.signal)
+      .then((profile) => {
+        if (controller.signal.aborted) {
+          return
+        }
+
+        if (profile) {
+          applyUserProfile(profile)
+          return
+        }
+
+        markProfileBootstrapped()
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          markProfileBootstrapped()
+        }
+      })
+
+    return () => {
+      controller.abort()
+    }
+  }, [applyUserProfile, markProfileBootstrapped])
 
   return (
     <div className="app-root">
@@ -122,7 +168,9 @@ function App() {
           <Route
             path="*"
             element={
-              isOnboarded ? (
+              !isProfileBootstrapped ? (
+                <RouteFallback />
+              ) : isOnboarded ? (
                 <Navigate to="/app/planner" replace />
               ) : (
                 <Navigate to="/onboarding" replace />

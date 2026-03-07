@@ -1,4 +1,4 @@
-import { create } from 'zustand'
+﻿import { create } from 'zustand'
 import { toDateKey } from '../utils/date'
 
 export type LessonType = 'lecture' | 'practice' | 'lab' | 'other'
@@ -8,7 +8,9 @@ export type Lesson = {
   subject: string
   teacher?: string
   room?: string
-  type?: LessonType | string
+  type?: string
+  typeLabel?: string
+  typeKey: LessonType
   startTime: string
   endTime: string
   date: string
@@ -76,4 +78,3 @@ export const selectLessonsForDate =
 
 export const selectTodayLessons = (state: ScheduleState) =>
   state.lessonsByDate[toDateKey(new Date())] ?? EMPTY_LESSONS
-

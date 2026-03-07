@@ -1,12 +1,7 @@
-import { apiGet } from './client'
+﻿import { apiGet } from './client'
+import type { EmployeeSearchResult } from '../types/user'
 
-export type Employee = {
-  id: string
-  fullName: string
-  position?: string
-  department?: string
-  avatarUrl?: string
-}
+export type Employee = EmployeeSearchResult
 
 export async function searchTeachers(
   query: string,
@@ -18,10 +13,9 @@ export async function searchTeachers(
     return []
   }
 
-  return apiGet<Employee[]>('/employees', {
-    params: { q: trimmed },
+  return apiGet<Employee[]>('/search-employee', {
+    params: { query: trimmed },
     signal,
     cacheTtlMs: 5 * 60_000,
   })
 }
-

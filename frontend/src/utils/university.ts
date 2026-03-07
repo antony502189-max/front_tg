@@ -1,5 +1,5 @@
 import type { Auditory } from '../api/auditories'
-import type { WeekSchedule } from '../api/schedule'
+import type { ScheduleResponse } from '../api/schedule'
 import type { Lesson } from '../store/scheduleStore'
 import {
   buildDateTime,
@@ -30,16 +30,14 @@ const normalizeRoomToken = (value: string) =>
     .toLowerCase()
     .replace(/\s+/g, '')
     .replace(/[.,]/g, '')
-    .replace(/корпус/g, 'к')
+    .replace(/\u043a\u043e\u0440\u043f\u0443\u0441/g, '\u043a')
 
 const getAuditoryTokens = (auditory: Auditory) => {
   const buildingDigits = auditory.building?.match(/\d+/)?.[0] ?? ''
   const tokens = [
     auditory.fullName,
     `${auditory.name}-${auditory.building ?? ''}`,
-    buildingDigits
-      ? `${auditory.name}-${buildingDigits}к`
-      : auditory.name,
+    buildingDigits ? `${auditory.name}-${buildingDigits}\u043a` : auditory.name,
     auditory.name,
   ]
 
@@ -90,15 +88,15 @@ export const getInitials = (fullName: string) => {
 
 export const collectAuditoryUsage = (
   auditory: Auditory,
-  weekSchedule: WeekSchedule | null,
+  schedule: ScheduleResponse | null,
 ) => {
-  if (!weekSchedule) {
+  if (!schedule) {
     return []
   }
 
   const auditoryTokens = getAuditoryTokens(auditory)
 
-  return weekSchedule.days
+  return schedule.days
     .flatMap((day) =>
       day.lessons
         .filter((lesson) =>

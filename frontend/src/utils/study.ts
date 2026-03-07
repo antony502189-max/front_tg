@@ -12,20 +12,20 @@ export const formatMarksLabel = (count: number) => {
   const remainder100 = count % 100
 
   if (remainder100 >= 11 && remainder100 <= 14) {
-    return 'оценок'
+    return '??????'
   }
 
   const remainder10 = count % 10
 
   if (remainder10 === 1) {
-    return 'оценка'
+    return '??????'
   }
 
   if (remainder10 >= 2 && remainder10 <= 4) {
-    return 'оценки'
+    return '??????'
   }
 
-  return 'оценок'
+  return '??????'
 }
 
 export const buildSubjectRating = (
