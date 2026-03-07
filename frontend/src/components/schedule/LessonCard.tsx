@@ -9,7 +9,7 @@ type LessonCardProps = {
 }
 
 const STATUS_LABELS: Partial<Record<LessonCardStatus, string>> = {
-  current: '??????',
+  current: 'Сейчас',
 }
 
 export const LessonCard = memo(({ lesson, status }: LessonCardProps) => {
@@ -54,7 +54,7 @@ export const LessonCard = memo(({ lesson, status }: LessonCardProps) => {
               <span className="schedule-lesson-text">{lesson.teacher}</span>
             )}
             {lesson.room && (
-              <span className="schedule-lesson-pill">???. {lesson.room}</span>
+              <span className="schedule-lesson-pill">ауд. {lesson.room}</span>
             )}
           </div>
         </div>

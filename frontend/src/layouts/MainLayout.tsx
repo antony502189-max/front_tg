@@ -23,31 +23,31 @@ type TabConfig = {
 const TABS: TabConfig[] = [
   {
     id: 'planner',
-    label: '??????',
+    label: 'Планер',
     path: '/app/planner',
     icon: <LayoutGrid size={20} />,
   },
   {
     id: 'study',
-    label: '?????',
+    label: 'Учёба',
     path: '/app/study',
     icon: <BookOpen size={20} />,
   },
   {
     id: 'schedule',
-    label: '??????????',
+    label: 'Расписание',
     path: '/app/schedule',
     icon: <CalendarDays size={20} />,
   },
   {
     id: 'univer',
-    label: '??????',
+    label: 'ВУЗ',
     path: '/app/univer',
     icon: <Building2 size={20} />,
   },
   {
     id: 'settings',
-    label: '?????????',
+    label: 'Настройки',
     path: '/app/settings',
     icon: <Settings2 size={20} />,
   },

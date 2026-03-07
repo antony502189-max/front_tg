@@ -13,9 +13,9 @@ import {
 } from '../store/tasksStore'
 
 const FILTER_LABELS: Record<TaskFilter, string> = {
-  all: '???',
-  active: '????????',
-  done: '??????',
+  all: 'Все',
+  active: 'Активные',
+  done: 'Готовые',
 }
 
 const filterTasks = (tasks: Task[], filter: TaskFilter) => {
@@ -61,9 +61,9 @@ export const PlannerPage = () => {
       <div className="planner-inner">
         <header className="planner-header">
           <div>
-            <h1 className="planner-title">??????</h1>
+            <h1 className="planner-title">Планер</h1>
             <p className="planner-subtitle">
-              ?????? ?????? ? ??????? ???????? ? ???????? ?? ???????.
+              Держите задачи в фокусе и привязывайте их к занятиям.
             </p>
           </div>
         </header>
@@ -100,10 +100,10 @@ export const PlannerPage = () => {
             ))
           ) : (
             <div className="planner-empty-card">
-              <h2 className="planner-empty-title">???? ?????</h2>
+              <h2 className="planner-empty-title">Пока пусто</h2>
               <p className="planner-empty-subtitle">
-                ???????? ?????? ??????, ????? ??????? ??????? ? ?????? ???? ?
-                ????? ?????.
+                Добавьте первую задачу, чтобы видеть дедлайны и статус прямо в
+                приложении.
               </p>
             </div>
           )}
@@ -114,7 +114,7 @@ export const PlannerPage = () => {
         type="button"
         className="planner-fab"
         onClick={() => setIsModalOpen(true)}
-        aria-label="???????? ??????"
+        aria-label="Добавить задачу"
       >
         +
       </button>
