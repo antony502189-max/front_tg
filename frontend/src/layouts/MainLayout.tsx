@@ -11,12 +11,15 @@ import {
   useNavigate,
   useOutlet,
 } from 'react-router-dom'
+import { useUserStore } from '../store/userStore'
+import type { UserRole } from '../types/user'
 
 type TabConfig = {
   id: string
   label: string
   path: string
   icon: ReactNode
+  roles?: UserRole[]
 }
 
 const TABS: TabConfig[] = [
@@ -31,6 +34,7 @@ const TABS: TabConfig[] = [
     label: 'Учёба',
     path: '/app/study',
     icon: <BookOpen size={20} />,
+    roles: ['student'],
   },
   {
     id: 'schedule',
@@ -56,9 +60,14 @@ export const MainLayout = () => {
   const location = useLocation()
   const navigate = useNavigate()
   const outlet = useOutlet()
+  const role = useUserStore((state) => state.role)
+
+  const tabs = TABS.filter(
+    (tab) => !tab.roles || (role !== null && tab.roles.includes(role)),
+  )
 
   const activeTabId =
-    TABS.find((tab) => location.pathname.startsWith(tab.path))?.id ??
+    tabs.find((tab) => location.pathname.startsWith(tab.path))?.id ??
     'planner'
 
   return (
@@ -71,7 +80,7 @@ export const MainLayout = () => {
         </div>
 
         <nav className="bottom-nav">
-          {TABS.map((tab) => {
+          {tabs.map((tab) => {
             const isActive = tab.id === activeTabId
 
             return (

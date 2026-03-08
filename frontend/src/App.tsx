@@ -1,4 +1,4 @@
-﻿import {
+import {
   Suspense,
   lazy,
   useEffect,
@@ -74,6 +74,27 @@ const RequireOnboarded = ({ children }: RequireOnboardedProps) => {
         replace
       />
     )
+  }
+
+  return children
+}
+
+type RequireStudentProps = {
+  children: ReactElement
+}
+
+const RequireStudent = ({ children }: RequireStudentProps) => {
+  const role = useUserStore((state) => state.role)
+  const isProfileBootstrapped = useUserStore(
+    (state) => state.isProfileBootstrapped,
+  )
+
+  if (!isProfileBootstrapped) {
+    return <RouteFallback />
+  }
+
+  if (role !== 'student') {
+    return <Navigate to="/app/planner" replace />
   }
 
   return children
@@ -160,7 +181,14 @@ function App() {
               element={<Navigate to="planner" replace />}
             />
             <Route path="planner" element={<PlannerPage />} />
-            <Route path="study" element={<StudyPage />} />
+            <Route
+              path="study"
+              element={
+                <RequireStudent>
+                  <StudyPage />
+                </RequireStudent>
+              }
+            />
             <Route path="schedule" element={<SchedulePage />} />
             <Route path="univer" element={<UniversityPage />} />
             <Route path="settings" element={<SettingsPage />} />
