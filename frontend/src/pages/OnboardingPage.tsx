@@ -9,7 +9,7 @@ export const OnboardingPage = () => {
       <div className="onboarding-shell">
         <ProfileEditor
           title="Ваш профиль"
-          subtitle="Укажите роль и данные, по которым backend найдёт ваши учебные данные."
+          subtitle="Укажите роль и данные, по которым мы найдём ваши учебные данные."
           submitLabel="Продолжить"
           onSaved={() => navigate('/app/planner', { replace: true })}
         />

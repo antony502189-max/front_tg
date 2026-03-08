@@ -409,7 +409,7 @@ export const ProfileEditor = ({
                 />
               </div>
               <p className="onboarding-hint">
-                Сначала найдите преподавателя через backend, затем выберите его из списка.
+                Сначала найдите преподавателя, затем выберите его из списка.
               </p>
             </div>
 
@@ -520,7 +520,7 @@ export const ProfileEditor = ({
                     Начните поиск преподавателя
                   </h3>
                   <p className="univer-helper-subtitle">
-                    Минимум 2 символа. После выбора профиль сохранит `employeeId` и `urlId`.
+                    Минимум 2 символа. После выбора профиль сохранится.
                   </p>
                 </div>
               )}

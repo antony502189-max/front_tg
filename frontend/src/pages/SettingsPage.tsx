@@ -59,7 +59,7 @@ export const SettingsPage = () => {
 
         <ProfileEditor
           title="Профиль"
-          subtitle="Обновите персональные и учебные параметры в backend-профиле."
+          subtitle="Обновите персональные и учебные параметры в профиле."
           submitLabel="Сохранить профиль"
         />
 
@@ -97,8 +97,8 @@ export const SettingsPage = () => {
           <section className="settings-section">
             <h2 className="settings-section-title">Роль преподавателя</h2>
             <p className="settings-section-text">
-              Для преподавателя важны поля `employeeId` и `urlId`. Они нужны
-              для поиска преподавателя и загрузки расписания через backend.
+              Заполните все поля. Они нужны
+              для поиска преподавателя и загрузки расписания.
             </p>
           </section>
         )}
@@ -106,8 +106,8 @@ export const SettingsPage = () => {
         <section className="settings-section settings-section--danger">
           <h2 className="settings-section-title">Сброс профиля</h2>
           <p className="settings-section-text">
-            Удалит локальные данные и backend-профиль, после чего вас снова
-            попросят пройти onboarding.
+            Удалит локальные данные и профиль, после чего вам опять
+            придётся пройти регистрацию.
           </p>
           <button
             type="button"

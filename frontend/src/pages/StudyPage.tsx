@@ -84,7 +84,7 @@ export const StudyPage = () => {
             <div>
               <h1 className="planner-title">Учёба</h1>
               <p className="planner-subtitle">
-                Для преподавателя раздел оценок пока недоступен в текущей версии.
+                Для преподавателя не нужны отмеки. Вы свое отучились).
               </p>
             </div>
           </header>
@@ -109,7 +109,7 @@ export const StudyPage = () => {
           <div>
             <h1 className="planner-title">Учёба</h1>
             <p className="planner-subtitle">
-              Следите за баллом успеваемости через backend по номеру вашей
+              Следите за баллом успеваемости по номеру вашей
               зачётки.
             </p>
           </div>
