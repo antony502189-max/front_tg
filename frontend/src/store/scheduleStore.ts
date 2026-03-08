@@ -1,5 +1,6 @@
-﻿import { create } from 'zustand'
+import { create } from 'zustand'
 import { toDateKey } from '../utils/date'
+import type { EmployeeSearchResult } from '../types/user'
 
 export type LessonType = 'lecture' | 'practice' | 'lab' | 'other'
 
@@ -21,6 +22,8 @@ export type ScheduleDay = {
   lessons: Lesson[]
 }
 
+type TeacherSchedulePreview = EmployeeSearchResult
+
 const EMPTY_LESSONS: Lesson[] = []
 
 type ScheduleState = {
@@ -28,15 +31,18 @@ type ScheduleState = {
   isLoading: boolean
   error: string | null
   lessonsByDate: Record<string, Lesson[]>
+  previewTeacher: TeacherSchedulePreview | null
   setLoading: (isLoading: boolean) => void
   setError: (error: string | null) => void
   setSchedule: (days: ScheduleDay[]) => void
+  setPreviewTeacher: (teacher: TeacherSchedulePreview | null) => void
+  clearPreviewTeacher: () => void
   clearSchedule: () => void
 }
 
 type ScheduleSlice = Pick<
   ScheduleState,
-  'days' | 'isLoading' | 'error' | 'lessonsByDate'
+  'days' | 'isLoading' | 'error' | 'lessonsByDate' | 'previewTeacher'
 >
 
 const defaultState: ScheduleSlice = {
@@ -44,6 +50,7 @@ const defaultState: ScheduleSlice = {
   isLoading: false,
   error: null,
   lessonsByDate: {},
+  previewTeacher: null,
 }
 
 export const useScheduleStore = create<ScheduleState>((set, get) => ({
@@ -62,12 +69,19 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
       ),
     })
   },
+  setPreviewTeacher: (previewTeacher) => {
+    set({ previewTeacher })
+  },
+  clearPreviewTeacher: () => {
+    set({ previewTeacher: null })
+  },
   clearSchedule: () => {
-    const { isLoading, error } = get()
+    const { isLoading, error, previewTeacher } = get()
     set({
       ...defaultState,
       isLoading,
       error,
+      previewTeacher,
     })
   },
 }))

@@ -1305,6 +1305,13 @@ button {
   align-items: center;
 }
 
+.univer-teacher-card--interactive {
+  width: 100%;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+}
+
 .univer-teacher-avatar {
   flex: 0 0 auto;
   width: 40px;
@@ -1338,6 +1345,7 @@ button {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  flex: 1 1 auto;
 }
 
 .univer-teacher-name {
@@ -1363,6 +1371,28 @@ button {
   border-radius: 999px;
   border: 1px solid rgba(148, 163, 184, 0.7);
   font-size: 11px;
+}
+
+.univer-teacher-action-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--tg-button-color);
+}
+
+.univer-teacher-action-icon,
+.univer-teacher-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.univer-teacher-arrow {
+  flex: 0 0 auto;
+  color: var(--tg-hint-color);
 }
 
 .univer-room-card {
@@ -1903,6 +1933,70 @@ body {
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.78), rgba(14, 165, 233, 0.1));
 }
 
+.schedule-preview-card {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+  padding: 16px 18px;
+  border-radius: 22px;
+  border: 1px solid var(--app-border);
+  background: var(--app-surface);
+}
+
+.schedule-preview-avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.schedule-preview-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.schedule-preview-initials {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--app-text-strong);
+}
+
+.schedule-preview-copy {
+  min-width: 0;
+}
+
+.schedule-preview-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--app-text-strong);
+}
+
+.schedule-preview-subtitle {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--app-text-muted);
+}
+
+.schedule-back-button {
+  grid-column: 1 / -1;
+  justify-self: flex-start;
+  padding: 9px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(96, 119, 143, 0.18);
+  background: rgba(255, 255, 255, 0.66);
+  color: var(--tg-text-color);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 .schedule-identity-label,
 .univer-identity-label,
 .schedule-period-label,
@@ -2009,6 +2103,10 @@ body {
   background: var(--app-surface);
 }
 
+.schedule-day-section--accent {
+  border-color: rgba(114, 181, 255, 0.22);
+}
+
 .schedule-day-section-header {
   display: flex;
   align-items: flex-start;
@@ -2021,6 +2119,12 @@ body {
   margin: 6px 0 0;
   font-size: 13px;
   color: var(--tg-hint-color);
+}
+
+.schedule-empty-inline {
+  padding: 8px 0 2px;
+  font-size: 14px;
+  color: var(--app-text-muted);
 }
 
 .schedule-lesson-card {
@@ -2320,6 +2424,14 @@ body {
   border-radius: 22px;
   background: var(--app-surface);
   border: 1px solid var(--app-border);
+}
+
+.univer-teacher-card--interactive {
+  color: inherit;
+}
+
+.univer-teacher-card--interactive:hover .univer-teacher-arrow {
+  color: var(--app-accent);
 }
 
 .free-room-generated-at {
@@ -2956,6 +3068,242 @@ body {
   vertical-align: middle;
 }
 
+.study-progress-section {
+  display: grid;
+  gap: 12px;
+}
+
+.study-progress-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.study-progress-note {
+  max-width: 460px;
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--app-text-muted);
+}
+
+.study-progress-table-shell {
+  border-radius: 24px;
+  border: 1px solid var(--app-card-border);
+  background: linear-gradient(
+    180deg,
+    rgba(17, 29, 43, 0.96),
+    rgba(22, 36, 52, 0.98)
+  );
+  box-shadow: none;
+}
+
+.study-progress-table-scroll {
+  overflow-x: auto;
+  padding: 14px 14px 120px;
+}
+
+.study-progress-table {
+  width: 100%;
+  min-width: 560px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.study-progress-table th,
+.study-progress-table td {
+  border: 1px solid rgba(173, 190, 209, 0.14);
+}
+
+.study-progress-table thead th {
+  padding: 14px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--app-accent);
+  font-size: 15px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.study-progress-index-head {
+  width: 62px;
+}
+
+.study-progress-subject-head-cell {
+  width: 188px;
+}
+
+.study-progress-total-head-inner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.study-progress-kind-head {
+  font-size: 14px;
+  letter-spacing: 0.04em;
+}
+
+.study-progress-index-cell {
+  padding: 18px 10px;
+  color: var(--app-text-strong);
+  font-size: 18px;
+  text-align: center;
+}
+
+.study-progress-subject-cell {
+  padding: 16px 14px;
+  vertical-align: top;
+}
+
+.study-progress-subject-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.study-progress-subject-name {
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--app-text-strong);
+}
+
+.study-progress-subject-teacher,
+.study-progress-subject-meta {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--app-text-muted);
+}
+
+.study-progress-value-cell {
+  padding: 0;
+  vertical-align: top;
+}
+
+.study-progress-cell-wrap {
+  position: relative;
+}
+
+.study-progress-cell-button {
+  width: 100%;
+  min-height: 92px;
+  padding: 14px 10px 12px;
+  border: none;
+  background: transparent;
+  color: var(--app-text-strong);
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  align-content: center;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.study-progress-cell-button--muted {
+  color: var(--app-text-muted);
+}
+
+.study-progress-cell-button--success:not(.study-progress-cell-button--active) {
+  background: rgba(105, 207, 143, 0.05);
+}
+
+.study-progress-cell-button--warning:not(.study-progress-cell-button--active) {
+  background: rgba(241, 199, 111, 0.05);
+}
+
+.study-progress-cell-button--danger:not(.study-progress-cell-button--active) {
+  background: rgba(255, 141, 134, 0.05);
+}
+
+.study-progress-cell-button--active {
+  background: rgba(114, 181, 255, 0.12);
+  color: var(--app-text-strong);
+}
+
+.study-progress-cell-count,
+.study-progress-cell-hours {
+  display: block;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.study-progress-cell-count {
+  font-size: 16px;
+}
+
+.study-progress-cell-hours {
+  font-size: 14px;
+  color: inherit;
+}
+
+.study-progress-popover {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 10px;
+  z-index: 4;
+  width: min(240px, calc(100vw - 56px));
+  padding: 12px 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(114, 181, 255, 0.24);
+  background: linear-gradient(
+    180deg,
+    rgba(67, 116, 191, 0.98),
+    rgba(49, 87, 148, 0.98)
+  );
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.28);
+}
+
+.study-progress-popover::before {
+  content: '';
+  position: absolute;
+  top: -6px;
+  left: 20px;
+  width: 12px;
+  height: 12px;
+  border-top: 1px solid rgba(114, 181, 255, 0.24);
+  border-left: 1px solid rgba(114, 181, 255, 0.24);
+  background: rgba(67, 116, 191, 0.98);
+  transform: rotate(45deg);
+}
+
+.study-progress-popover--center {
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.study-progress-popover--center::before {
+  left: calc(50% - 6px);
+}
+
+.study-progress-popover--end {
+  right: 10px;
+  left: auto;
+}
+
+.study-progress-popover--end::before {
+  right: 20px;
+  left: auto;
+}
+
+.study-progress-popover-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(230, 241, 255, 0.72);
+}
+
+.study-progress-popover-text {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.45;
+  color: #f5f9ff;
+}
 .study-student-title,
 .study-role-title {
   margin-top: 8px;
@@ -3022,6 +3370,16 @@ body {
 .schedule-lesson-state-pill {
   background: var(--app-success-soft);
   color: var(--app-success);
+}
+
+.schedule-back-button {
+  border-color: var(--app-card-border);
+  background: var(--app-accent-soft);
+  color: var(--app-text-strong);
+}
+
+.univer-teacher-action-copy {
+  color: var(--app-accent);
 }
 
 .schedule-lesson-kind--lecture,
@@ -3169,6 +3527,22 @@ body {
   .study-metric-value--hero {
     font-size: 32px;
   }
+
+  .study-progress-table-scroll {
+    padding: 12px 12px 112px;
+  }
+
+  .study-progress-table {
+    min-width: 520px;
+  }
+
+  .study-progress-subject-head-cell {
+    width: 168px;
+  }
+
+  .schedule-preview-card {
+    grid-template-columns: 48px minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 420px) {
@@ -3189,5 +3563,13 @@ body {
   .study-inline-skeleton--hero-metric {
     width: 62px;
     height: 30px;
+  }
+
+  .study-progress-popover {
+    width: min(220px, calc(100vw - 40px));
+  }
+
+  .schedule-preview-card {
+    grid-template-columns: 1fr;
   }
 }

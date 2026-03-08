@@ -2,7 +2,7 @@
 import type { Lesson } from '../store/scheduleStore'
 import type { UserRole } from '../types/user'
 
-export type ScheduleViewMode = 'day' | 'week' | 'month'
+export type ScheduleViewMode = 'day' | 'week' | 'month' | 'semester'
 
 export type DaySchedule = {
   date: string

@@ -123,7 +123,7 @@ ORDERED_WEEKDAYS = tuple(
 INDEX_TO_RUSSIAN_WEEKDAY = {
     index: day_name for day_name, index in RUSSIAN_WEEKDAY_TO_INDEX.items()
 }
-SUPPORTED_SCHEDULE_VIEWS = frozenset({"day", "week", "month"})
+SUPPORTED_SCHEDULE_VIEWS = frozenset({"day", "week", "month", "semester"})
 LESSON_TYPE_ALIASES = {
     "лк": "lecture",
     "лек": "lecture",
@@ -577,6 +577,35 @@ def week_start(value: date) -> date:
     return value - timedelta(days=value.weekday())
 
 
+def resolve_schedule_semester_end(payload: Any, reference_date: date) -> date:
+    schedules = payload.get("schedules") if isinstance(payload, dict) else None
+    if not isinstance(schedules, dict):
+        return reference_date
+
+    latest_date: date | None = None
+
+    for raw_lessons in schedules.values():
+        if not isinstance(raw_lessons, list):
+            continue
+
+        for raw_lesson in raw_lessons:
+            if not isinstance(raw_lesson, dict):
+                continue
+
+            for candidate in (
+                parse_dot_date(raw_lesson.get("endLessonDate")),
+                parse_dot_date(raw_lesson.get("dateLesson")),
+                parse_dot_date(raw_lesson.get("startLessonDate")),
+            ):
+                if candidate is None or candidate < reference_date:
+                    continue
+
+                if latest_date is None or candidate > latest_date:
+                    latest_date = candidate
+
+    return latest_date or reference_date
+
+
 def schedule_week_for_date(
     current_week: int,
     today_value: date,
@@ -588,11 +617,18 @@ def schedule_week_for_date(
     return ((current_week - 1 + offset_weeks) % 4) + 1
 
 
-def resolve_schedule_range(reference_date: date, view: str) -> tuple[date, date]:
+def resolve_schedule_range(
+    reference_date: date,
+    view: str,
+    payload: Any | None = None,
+) -> tuple[date, date]:
     normalized_view = normalize_schedule_view(view)
 
     if normalized_view == "day":
         return reference_date, reference_date
+
+    if normalized_view == "semester":
+        return reference_date, resolve_schedule_semester_end(payload, reference_date)
 
     if normalized_view == "month":
         month_start = reference_date.replace(day=1)
@@ -746,7 +782,11 @@ def normalize_schedule_response(
     schedules = payload.get("schedules") if isinstance(payload, dict) else None
     normalized_view = normalize_schedule_view(view)
     target_date = reference_date or today_value
-    range_start, range_end = resolve_schedule_range(target_date, normalized_view)
+    range_start, range_end = resolve_schedule_range(
+        target_date,
+        normalized_view,
+        payload,
+    )
 
     if not isinstance(schedules, dict):
         return {

@@ -473,6 +473,37 @@ class BackendServerTests(unittest.TestCase):
         self.assertEqual(monday["lessons"][0]["teacher"], "Ivanov Ivan Ivanovich")
         self.assertEqual(monday["lessons"][0]["typeKey"], "lecture")
 
+    def test_normalize_schedule_response_supports_semester_view(self) -> None:
+        payload = {
+            "schedules": {
+                "Понедельник": [
+                    {
+                        "subjectFullName": "Higher Math",
+                        "startLessonTime": "10:05",
+                        "endLessonTime": "11:30",
+                        "lessonTypeAbbrev": "ЛК",
+                        "weekNumber": [3],
+                        "startLessonDate": "01.03.2026",
+                        "endLessonDate": "30.04.2026",
+                    }
+                ]
+            }
+        }
+
+        normalized = normalize_schedule_response(
+            payload,
+            3,
+            date(2026, 3, 4),
+            reference_date=date(2026, 3, 9),
+            view="semester",
+        )
+
+        self.assertEqual(normalized["view"], "semester")
+        self.assertEqual(normalized["rangeStart"], "2026-03-09")
+        self.assertEqual(normalized["rangeEnd"], "2026-04-30")
+        self.assertEqual(normalized["days"][0]["date"], "2026-03-09")
+        self.assertEqual(normalized["days"][-1]["date"], "2026-04-30")
+
     def test_schedule_route_returns_frontend_contract(self) -> None:
         def fetcher(path: str, _params: dict[str, str]):
             if path == "/schedule":
@@ -1633,6 +1664,45 @@ class BackendServerTests(unittest.TestCase):
             seen_paths,
             ["/employees/schedule/petrov-p-p", "/schedule/current-week"],
         )
+
+    def test_teacher_schedule_route_supports_semester_view(self) -> None:
+        def fetcher(path: str, _params: dict[str, str]):
+            if path == "/employees/schedule/petrov-p-p":
+                return {
+                    "schedules": {
+                        "Понедельник": [
+                            {
+                                "subjectFullName": "Discrete Math",
+                                "startLessonTime": "09:00",
+                                "endLessonTime": "10:20",
+                                "lessonTypeAbbrev": "ЛК",
+                                "startLessonDate": "01.03.2026",
+                                "endLessonDate": "30.04.2026",
+                            }
+                        ]
+                    }
+                }
+            if path == "/schedule/current-week":
+                return 3
+
+            raise AssertionError(f"Unexpected path: {path}")
+
+        app = BackendApp(
+            config=TEST_CONFIG,
+            fetcher=fetcher,
+            today=lambda: date(2026, 3, 9),
+        )
+
+        response = app.handle_request(
+            "GET",
+            "/api/schedule?teacherUrlId=petrov-p-p&view=semester&date=2026-03-09",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.payload["view"], "semester")
+        self.assertEqual(response.payload["rangeStart"], "2026-03-09")
+        self.assertEqual(response.payload["rangeEnd"], "2026-04-30")
+        self.assertEqual(response.payload["days"][0]["date"], "2026-03-09")
 
     def test_profile_route_supports_put_get_and_delete(self) -> None:
         store_path = Path("backend") / "_profile_store_test.json"

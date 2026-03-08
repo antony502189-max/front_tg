@@ -5,6 +5,7 @@ import {
 } from 'react'
 import { Search } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
+import { useNavigate } from 'react-router-dom'
 import {
   fetchFreeAuditories,
   type FreeAuditoriesResponse,
@@ -15,6 +16,7 @@ import { FreeAuditoriesResults } from '../components/university/FreeAuditoriesRe
 import { TeacherResults } from '../components/university/TeacherResults'
 import { useAsyncResource } from '../hooks/useAsyncResource'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
+import { useScheduleStore } from '../store/scheduleStore'
 import { useUserStore } from '../store/userStore'
 
 type SearchMode = 'teachers' | 'freeRooms'
@@ -41,6 +43,7 @@ const SEARCH_MODE_CONFIG: Record<
 }
 
 export const UniversityPage = () => {
+  const navigate = useNavigate()
   const { role, groupNumber, urlId, employeeId, fullName } = useUserStore(
     useShallow((state) => ({
       role: state.role,
@@ -49,6 +52,9 @@ export const UniversityPage = () => {
       employeeId: state.employeeId,
       fullName: state.fullName,
     })),
+  )
+  const setPreviewTeacher = useScheduleStore(
+    (state) => state.setPreviewTeacher,
   )
 
   const [mode, setMode] = useState<SearchMode>('teachers')
@@ -214,6 +220,10 @@ export const UniversityPage = () => {
             error={teacherResource.error}
             teachers={teacherResource.data}
             onRetry={teacherResource.reload}
+            onSelectTeacher={(teacher) => {
+              setPreviewTeacher(teacher)
+              navigate('/app/schedule')
+            }}
           />
         ) : (
           <FreeAuditoriesResults

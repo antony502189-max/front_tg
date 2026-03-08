@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
@@ -22,11 +23,12 @@ import {
   ScheduleLoadingState,
 } from '../components/loading/PageLoadingStates'
 import { useAsyncResource } from '../hooks/useAsyncResource'
+import { getInitials } from '../utils/university'
 import { useScheduleStore, type Lesson } from '../store/scheduleStore'
 import { useUserStore } from '../store/userStore'
 import { buildDateTime, parseDateKey, toDateKey } from '../utils/date'
 
-const VIEW_OPTIONS: Array<{
+const DEFAULT_VIEW_OPTIONS: Array<{
   value: ScheduleViewMode
   label: string
 }> = [
@@ -34,6 +36,11 @@ const VIEW_OPTIONS: Array<{
   { value: 'week', label: 'Неделя' },
   { value: 'month', label: 'Месяц' },
 ]
+
+const TEACHER_VIEW_OPTIONS: Array<{
+  value: ScheduleViewMode
+  label: string
+}> = [...DEFAULT_VIEW_OPTIONS, { value: 'semester', label: 'Семестр' }]
 
 const dayFormatter = new Intl.DateTimeFormat('ru-RU', {
   weekday: 'long',
@@ -74,8 +81,10 @@ const shiftDateKey = (
     nextDate.setDate(nextDate.getDate() + direction)
   } else if (view === 'week') {
     nextDate.setDate(nextDate.getDate() + direction * 7)
-  } else {
+  } else if (view === 'month') {
     nextDate.setMonth(nextDate.getMonth() + direction)
+  } else {
+    nextDate.setMonth(nextDate.getMonth() + direction * 4)
   }
 
   return toDateKey(nextDate)
@@ -141,20 +150,47 @@ const getLessonStatus = (
   return 'upcoming'
 }
 
+const getRelativeDayLabel = (dateKey: string, todayKey: string) => {
+  if (dateKey === todayKey) {
+    return 'Сегодня'
+  }
+
+  const today = parseDateKey(todayKey)
+  const current = parseDateKey(dateKey)
+
+  if (!today || !current) {
+    return null
+  }
+
+  const tomorrow = new Date(today)
+  tomorrow.setDate(tomorrow.getDate() + 1)
+
+  return toDateKey(tomorrow) === dateKey ? 'Завтра' : null
+}
+
 export const SchedulePage = () => {
-  const { role, groupNumber, urlId, employeeId, fullName } = useUserStore(
-    useShallow((state) => ({
-      role: state.role,
-      groupNumber: state.groupNumber,
-      urlId: state.urlId,
-      employeeId: state.employeeId,
-      fullName: state.fullName,
-    })),
-  )
-  const { setSchedule, clearSchedule } = useScheduleStore(
+  const { role, groupNumber, urlId, employeeId, fullName, subgroup } =
+    useUserStore(
+      useShallow((state) => ({
+        role: state.role,
+        groupNumber: state.groupNumber,
+        urlId: state.urlId,
+        employeeId: state.employeeId,
+        fullName: state.fullName,
+        subgroup: state.subgroup,
+      })),
+    )
+  const {
+    setSchedule,
+    clearSchedule,
+    previewTeacher,
+    clearPreviewTeacher,
+  } = useScheduleStore(
     useShallow((state) => ({
       setSchedule: state.setSchedule,
       clearSchedule: state.clearSchedule,
+      previewTeacher: state.previewTeacher,
+      clearPreviewTeacher: state.clearPreviewTeacher,
     })),
   )
 
@@ -167,18 +203,76 @@ export const SchedulePage = () => {
   const normalizedGroupNumber = groupNumber.trim()
   const normalizedTeacherUrlId = urlId.trim()
   const normalizedTeacherEmployeeId = employeeId.trim()
+  const previewTeacherUrlId = previewTeacher?.urlId.trim() ?? ''
+  const previewTeacherEmployeeId =
+    previewTeacher?.employeeId.trim() ?? ''
+  const isTeacherPreview = previewTeacherUrlId.length > 0
+  const effectiveRole = isTeacherPreview ? 'teacher' : role
+  const activeTeacherUrlId = isTeacherPreview
+    ? previewTeacherUrlId
+    : normalizedTeacherUrlId
+  const activeTeacherEmployeeId = isTeacherPreview
+    ? previewTeacherEmployeeId
+    : normalizedTeacherEmployeeId
   const hasIdentity =
-    role === 'teacher'
-      ? normalizedTeacherUrlId.length > 0
+    effectiveRole === 'teacher'
+      ? activeTeacherUrlId.length > 0
       : normalizedGroupNumber.length > 0
+  const viewOptions =
+    effectiveRole === 'teacher'
+      ? TEACHER_VIEW_OPTIONS
+      : DEFAULT_VIEW_OPTIONS
+
+  const previousPreviewRef = useRef(isTeacherPreview)
+  const previousPreviewTeacherIdRef = useRef(activeTeacherUrlId)
+
+  useEffect(() => {
+    const enteredPreview =
+      isTeacherPreview && !previousPreviewRef.current
+    const switchedPreviewTeacher =
+      isTeacherPreview &&
+      previousPreviewTeacherIdRef.current !== activeTeacherUrlId
+
+    if (enteredPreview || switchedPreviewTeacher) {
+      startTransition(() => {
+        setReferenceDate(todayKey)
+        setView('semester')
+      })
+    }
+
+    if (
+      !isTeacherPreview &&
+      previousPreviewRef.current &&
+      role === 'student'
+    ) {
+      startTransition(() => {
+        setReferenceDate(todayKey)
+        setView('week')
+      })
+    }
+
+    previousPreviewRef.current = isTeacherPreview
+    previousPreviewTeacherIdRef.current = activeTeacherUrlId
+  }, [activeTeacherUrlId, isTeacherPreview, role, todayKey])
+
+  useEffect(() => {
+    if (
+      effectiveRole !== 'teacher' &&
+      view === 'semester'
+    ) {
+      setView('week')
+    }
+  }, [effectiveRole, view])
 
   const requestKey =
-    role && hasIdentity
+    effectiveRole && hasIdentity
       ? [
-          role,
-          role === 'teacher'
-            ? normalizedTeacherUrlId
+          effectiveRole,
+          effectiveRole === 'teacher'
+            ? activeTeacherUrlId
             : normalizedGroupNumber,
+          activeTeacherEmployeeId,
+          subgroup,
           view,
           referenceDate,
         ].join(':')
@@ -186,7 +280,7 @@ export const SchedulePage = () => {
 
   const loadSchedule = useCallback(
     (signal: AbortSignal) => {
-      if (!role) {
+      if (!effectiveRole) {
         return Promise.resolve<ScheduleResponse>({
           view,
           rangeStart: referenceDate,
@@ -197,22 +291,22 @@ export const SchedulePage = () => {
 
       return fetchSchedule(
         {
-          role,
+          role: effectiveRole,
           date: referenceDate,
           view,
           groupNumber: normalizedGroupNumber,
-          teacherUrlId: normalizedTeacherUrlId,
-          teacherEmployeeId: normalizedTeacherEmployeeId,
+          teacherUrlId: activeTeacherUrlId,
+          teacherEmployeeId: activeTeacherEmployeeId,
         },
         signal,
       )
     },
     [
+      activeTeacherEmployeeId,
+      activeTeacherUrlId,
+      effectiveRole,
       normalizedGroupNumber,
-      normalizedTeacherEmployeeId,
-      normalizedTeacherUrlId,
       referenceDate,
-      role,
       view,
     ],
   )
@@ -226,7 +320,7 @@ export const SchedulePage = () => {
     reload,
     updatedAt,
   } = useAsyncResource<ScheduleResponse | null>({
-    enabled: hasIdentity && role !== null,
+    enabled: hasIdentity && effectiveRole !== null,
     requestKey,
     initialData: null,
     load: loadSchedule,
@@ -259,16 +353,24 @@ export const SchedulePage = () => {
       return error
     }
 
-    if (role === 'teacher' && !normalizedTeacherUrlId) {
-      return 'Укажите профиль преподавателя в настройках, чтобы смотреть персональное расписание.'
+    if (effectiveRole === 'teacher' && !activeTeacherUrlId) {
+      return isTeacherPreview
+        ? 'Выберите преподавателя во вкладке ВУЗ, чтобы открыть его расписание.'
+        : 'Укажите профиль преподавателя в настройках, чтобы смотреть персональное расписание.'
     }
 
-    if (role !== 'teacher' && !normalizedGroupNumber) {
+    if (effectiveRole !== 'teacher' && !normalizedGroupNumber) {
       return 'Добавьте номер группы в настройках, чтобы загрузить расписание.'
     }
 
     return null
-  }, [error, normalizedGroupNumber, normalizedTeacherUrlId, role])
+  }, [
+    activeTeacherUrlId,
+    effectiveRole,
+    error,
+    isTeacherPreview,
+    normalizedGroupNumber,
+  ])
   const blockingError = !hasData ? displayError : null
   const refreshError = hasData ? error : null
 
@@ -284,25 +386,32 @@ export const SchedulePage = () => {
       })),
     }))
 
-    if (view === 'day') {
+    if (view === 'day' || view === 'semester') {
       return mappedDays
     }
 
     return mappedDays.filter((day) => day.lessons.length > 0)
   }, [rawDays, view])
 
-  const hasLessons = visibleDays.some((day) => day.lessons.length > 0)
   const rangeLabel = formatScheduleRange(
     data?.rangeStart ?? referenceDate,
     data?.rangeEnd ?? referenceDate,
     view,
   )
   const identityLabel =
-    role === 'teacher'
-      ? fullName.trim() || 'Профиль преподавателя'
+    effectiveRole === 'teacher'
+      ? previewTeacher?.fullName.trim() ||
+        fullName.trim() ||
+        'Профиль преподавателя'
       : normalizedGroupNumber
         ? `Группа ${normalizedGroupNumber}`
         : 'Группа не указана'
+  const subtitle =
+    effectiveRole === 'teacher'
+      ? isTeacherPreview
+        ? 'Просматриваете расписание преподавателя, выбранного во вкладке ВУЗ.'
+        : 'Смотрите персональное расписание преподавателя по urlId.'
+      : 'Смотрите расписание по номеру вашей учебной группы.'
   const refreshBadge = isRefreshing ? (
     <DataRefreshBadge
       label="Обновляем расписание"
@@ -323,25 +432,60 @@ export const SchedulePage = () => {
         <header className="schedule-header schedule-header--modern">
           <div>
             <span className="schedule-kicker">
-              {role === 'teacher' ? 'Преподаватель' : 'Студент'}
+              {effectiveRole === 'teacher' ? 'Преподаватель' : 'Студент'}
             </span>
             <h1 className="planner-title">Расписание</h1>
-            {role !== 'teacher' && (
-              <p className="planner-subtitle">
-                Смотрите расписание через backend по номеру вашей учебной группы.
-              </p>
-            )}
+            <p className="planner-subtitle">{subtitle}</p>
           </div>
 
           <div className="schedule-identity-card">
             <span className="schedule-identity-label">Профиль</span>
-            <strong className="schedule-identity-value">{identityLabel}</strong>
+            <strong className="schedule-identity-value">
+              {identityLabel}
+            </strong>
           </div>
         </header>
 
+        {isTeacherPreview && previewTeacher && (
+          <section className="schedule-preview-card">
+            <div className="schedule-preview-avatar">
+              {previewTeacher.avatarUrl ? (
+                <img
+                  src={previewTeacher.avatarUrl}
+                  alt={`Фото ${previewTeacher.fullName}`}
+                />
+              ) : (
+                <span className="schedule-preview-initials">
+                  {getInitials(previewTeacher.fullName)}
+                </span>
+              )}
+            </div>
+
+            <div className="schedule-preview-copy">
+              <h2 className="schedule-preview-title">
+                {previewTeacher.fullName}
+              </h2>
+              <p className="schedule-preview-subtitle">
+                {previewTeacher.position || 'Преподаватель'}
+                {previewTeacher.department
+                  ? ` · ${previewTeacher.department}`
+                  : ''}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              className="schedule-back-button"
+              onClick={clearPreviewTeacher}
+            >
+              К моему расписанию
+            </button>
+          </section>
+        )}
+
         <section className="schedule-toolbar">
           <div className="schedule-view-toggle" role="tablist">
-            {VIEW_OPTIONS.map((option) => {
+            {viewOptions.map((option) => {
               const isActive = view === option.value
 
               return (
@@ -387,7 +531,9 @@ export const SchedulePage = () => {
                   ? 'Выбранный день'
                   : view === 'week'
                     ? 'Текущая неделя'
-                    : 'Текущий месяц'}
+                    : view === 'month'
+                      ? 'Текущий месяц'
+                      : 'До конца семестра'}
               </span>
               <strong className="schedule-period-value">{rangeLabel}</strong>
             </div>
@@ -440,33 +586,57 @@ export const SchedulePage = () => {
 
         {hasData && !blockingError && (
           <section className="schedule-day-groups">
-            {hasLessons ? (
-              visibleDays.map((day) => (
-                <article key={day.date} className="schedule-day-section">
-                  <header className="schedule-day-section-header">
-                    <div>
-                      <h2 className="schedule-section-title">
-                        {formatScheduleDate(day.date)}
-                      </h2>
-                      <p className="schedule-day-section-subtitle">
-                        {day.date === todayKey
-                          ? 'Сегодня'
-                          : `${day.lessons.length} ${getLessonCountLabel(day.lessons.length)}`}
-                      </p>
-                    </div>
-                  </header>
+            {visibleDays.length > 0 ? (
+              visibleDays.map((day) => {
+                const relativeDayLabel = getRelativeDayLabel(
+                  day.date,
+                  todayKey,
+                )
+                const lessonsLabel =
+                  day.lessons.length > 0
+                    ? `${day.lessons.length} ${getLessonCountLabel(day.lessons.length)}`
+                    : 'Нет занятий'
 
-                  <div className="schedule-lessons-list">
-                    {day.lessons.map((lesson) => (
-                      <LessonCard
-                        key={lesson.id}
-                        lesson={lesson}
-                        status={lesson.status}
-                      />
-                    ))}
-                  </div>
-                </article>
-              ))
+                return (
+                  <article
+                    key={day.date}
+                    className={`schedule-day-section${
+                      relativeDayLabel
+                        ? ' schedule-day-section--accent'
+                        : ''
+                    }`}
+                  >
+                    <header className="schedule-day-section-header">
+                      <div>
+                        <h2 className="schedule-section-title">
+                          {relativeDayLabel ?? formatScheduleDate(day.date)}
+                        </h2>
+                        <p className="schedule-day-section-subtitle">
+                          {relativeDayLabel
+                            ? `${formatScheduleDate(day.date)} · ${lessonsLabel}`
+                            : lessonsLabel}
+                        </p>
+                      </div>
+                    </header>
+
+                    {day.lessons.length > 0 ? (
+                      <div className="schedule-lessons-list">
+                        {day.lessons.map((lesson) => (
+                          <LessonCard
+                            key={lesson.id}
+                            lesson={lesson}
+                            status={lesson.status}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="schedule-empty-inline">
+                        Нет занятий
+                      </div>
+                    )}
+                  </article>
+                )
+              })
             ) : (
               <div className="schedule-empty-card">
                 <h2 className="schedule-empty-title">Занятий не найдено</h2>
