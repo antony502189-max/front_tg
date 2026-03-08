@@ -1,7 +1,12 @@
 import { useCallback, useMemo } from 'react'
+import { Star, Trophy } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { fetchGrades, type GradesResponse } from '../api/grades'
 import { getApiErrorMessage } from '../api/client'
+import {
+  DataRefreshBadge,
+  StudyLoadingState,
+} from '../components/loading/PageLoadingStates'
 import { useAsyncResource } from '../hooks/useAsyncResource'
 import { useUserStore } from '../store/userStore'
 import { buildSubjectRating, formatMarksLabel } from '../utils/study'
@@ -19,6 +24,24 @@ const getMarkTone = (value: number) => {
 
   return 'danger'
 }
+
+const StudyMetricValue = ({
+  isLoading,
+  value,
+  className = '',
+}: {
+  isLoading: boolean
+  value: string | number
+  className?: string
+}) =>
+  isLoading ? (
+    <span
+      className={`app-skeleton study-inline-skeleton ${className}`.trim()}
+      aria-hidden="true"
+    />
+  ) : (
+    value
+  )
 
 export const StudyPage = () => {
   const { role, groupNumber, studentCardNumber } = useUserStore(
@@ -46,9 +69,11 @@ export const StudyPage = () => {
   const {
     data,
     error,
-    isLoading,
+    hasData,
+    isInitialLoading,
+    isRefreshing,
     reload,
-    hasResolvedCurrentRequest,
+    updatedAt,
   } = useAsyncResource<GradesResponse | null>({
     enabled: canLoadGrades,
     requestKey: canLoadGrades
@@ -56,6 +81,7 @@ export const StudyPage = () => {
       : null,
     initialData: null,
     load: loadGrades,
+    keepPreviousData: true,
     getErrorMessage: (requestError) =>
       getApiErrorMessage(
         requestError,
@@ -66,8 +92,9 @@ export const StudyPage = () => {
   const displayMessage = hasStudentCardNumber
     ? error
     : 'Укажите номер зачётки в профиле, чтобы видеть успеваемость.'
-  const canRenderResults =
-    hasStudentCardNumber && hasResolvedCurrentRequest && !error
+  const blockingDisplayMessage = !hasData ? displayMessage : null
+  const refreshError = hasData ? error : null
+  const canRenderResults = hasStudentCardNumber && hasData
   const summary = data?.summary
   const subjects = data?.subjects ?? EMPTY_SUBJECTS
   const warning = data?.warning
@@ -75,6 +102,20 @@ export const StudyPage = () => {
     () => buildSubjectRating(subjects).slice(0, 5),
     [subjects],
   )
+  const specialityLabel =
+    summary?.speciality ?? 'Специальность не определена'
+  const positionLabel = summary?.position ?? '—'
+  const averageLabel = summary?.average?.toFixed(1) ?? '—'
+  const studyStatusLabel = isRefreshing
+    ? 'Обновляем данные'
+    : refreshError
+      ? 'Показаны сохраненные данные'
+      : 'Оценки / рейтинг'
+  const studyStatusTone = isRefreshing
+    ? 'loading'
+    : refreshError
+      ? 'warning'
+      : 'neutral'
 
   if (role !== 'student') {
     return (
@@ -116,53 +157,89 @@ export const StudyPage = () => {
         </header>
 
         <section className="study-student-card">
-          <div className="study-student-copy">
+          <div className="study-student-topline">
             <span className="study-student-badge">Студент</span>
-            <h2 className="study-student-title">
+            <DataRefreshBadge
+              label={studyStatusLabel}
+              updatedAt={updatedAt}
+              tone={studyStatusTone}
+            />
+          </div>
+
+          <div className="study-student-copy">
+            <p className="study-student-subtitle study-student-subtitle--meta">
               {groupNumber.trim()
                 ? `Группа ${groupNumber.trim()}`
-                : 'Не указана группа'}
-            </h2>
-            <p className="study-student-subtitle">
+                : 'Группа не указана'}
+              {' · '}
               Зачётка {normalizedStudentCardNumber || 'не указана'}
             </p>
           </div>
 
+          <div className="study-speciality-panel">
+            <span className="study-speciality-label">Специальность</span>
+            <h2 className="study-speciality-value">
+              <StudyMetricValue
+                isLoading={isInitialLoading}
+                value={specialityLabel}
+                className="study-inline-skeleton--speciality"
+              />
+            </h2>
+          </div>
+
           <div className="study-student-metrics">
-            <div className="study-metric-card">
+            <article className="study-metric-card study-metric-card--hero">
+              <span className="study-metric-label">Ваше место</span>
+              <div className="study-metric-main">
+                <span
+                  className="study-metric-icon study-metric-icon--rank"
+                  aria-hidden="true"
+                >
+                  <Trophy size={18} />
+                </span>
+                <strong className="study-metric-value study-metric-value--hero">
+                  <StudyMetricValue
+                    isLoading={isInitialLoading}
+                    value={positionLabel}
+                    className="study-inline-skeleton--hero-metric"
+                  />
+                </strong>
+              </div>
+              <p className="study-metric-note">в рейтинге группы</p>
+            </article>
+
+            <article className="study-metric-card study-metric-card--hero study-metric-card--accent">
               <span className="study-metric-label">Средний балл</span>
-              <strong className="study-metric-value">
-                {summary?.average?.toFixed(1) ?? '?'}
-              </strong>
-            </div>
+              <div className="study-metric-main study-metric-main--reverse">
+                <strong className="study-metric-value study-metric-value--hero">
+                  <StudyMetricValue
+                    isLoading={isInitialLoading}
+                    value={averageLabel}
+                    className="study-inline-skeleton--hero-metric"
+                  />
+                </strong>
+                <span
+                  className="study-metric-icon study-metric-icon--average"
+                  aria-hidden="true"
+                >
+                  <Star size={18} />
+                </span>
+              </div>
+              <p className="study-metric-note">по всем предметам</p>
+            </article>
+          </div>
 
-            <div className="study-metric-card">
-              <span className="study-metric-label">Позиция</span>
-              <strong className="study-metric-value">
-                {summary?.position ?? '?'}
-              </strong>
-            </div>
-
-            <div className="study-metric-card">
-              <span className="study-metric-label">Специальность</span>
-              <strong className="study-metric-value study-metric-value--compact">
-                {summary?.speciality ?? '?'}
-              </strong>
-            </div>
+          <div className="study-student-footnote">
+            <span className="study-student-footnote-dot" aria-hidden="true" />
+            <span>Специальность, рейтинг и средний балл обновляются из IIS.</span>
           </div>
         </section>
 
-        {isLoading && (
-          <div className="study-skeleton-list">
-            <div className="study-skeleton-card" />
-            <div className="study-skeleton-card" />
-            <div className="study-skeleton-card" />
-          </div>
-        )}
+        {isInitialLoading && <StudyLoadingState />}
 
-        {!isLoading && displayMessage && (
+        {blockingDisplayMessage && !isInitialLoading && (
           <div className="study-error-card">
-            <p className="study-error-text">{displayMessage}</p>
+            <p className="study-error-text">{blockingDisplayMessage}</p>
             {hasStudentCardNumber && (
               <button
                 type="button"
@@ -175,7 +252,7 @@ export const StudyPage = () => {
           </div>
         )}
 
-        {!isLoading && canRenderResults && (
+        {canRenderResults && (
           <>
             {warning && (
               <div className="study-error-card">

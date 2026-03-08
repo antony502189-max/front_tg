@@ -41,6 +41,9 @@ const defaultTouched: TouchedState = {
   teacher: false,
 }
 
+const normalizeTeacherQuery = (value: string) =>
+  value.trim().replace(/\s+/g, ' ')
+
 const ROLE_OPTIONS: Array<{
   value: UserRole
   label: string
@@ -143,19 +146,27 @@ export const ProfileEditor = ({
     roleFromStore,
   ])
 
+  const normalizedTeacherQuery = normalizeTeacherQuery(teacherQuery)
+  const selectedTeacherQuery = selectedTeacher
+    ? normalizeTeacherQuery(selectedTeacher.fullName)
+    : ''
+  const hasTeacherQuery =
+    role === 'teacher' && normalizedTeacherQuery.length >= 2
+  const shouldSearchTeachers =
+    hasTeacherQuery &&
+    (!selectedTeacher ||
+      normalizedTeacherQuery !== selectedTeacherQuery)
   const deferredTeacherQuery = useDeferredValue(
-    teacherQuery.trim(),
+    normalizedTeacherQuery,
   )
   const debouncedTeacherQuery = useDebouncedValue(
     deferredTeacherQuery,
     300,
   )
-  const hasTeacherQuery =
-    role === 'teacher' && debouncedTeacherQuery.length >= 2
 
   const teacherResource = useAsyncResource<Employee[]>({
-    enabled: hasTeacherQuery,
-    requestKey: hasTeacherQuery
+    enabled: shouldSearchTeachers,
+    requestKey: shouldSearchTeachers
       ? `teacher-search:${debouncedTeacherQuery}`
       : null,
     initialData: EMPTY_EMPLOYEES,
@@ -174,6 +185,11 @@ export const ProfileEditor = ({
   const isTeacherFormValid = selectedTeacher !== null
   const isFormValid =
     role === 'student' ? isStudentFormValid : isTeacherFormValid
+  const shouldRenderTeacherSearchResults =
+    teacherResource.isLoading ||
+    teacherResource.error !== null ||
+    shouldSearchTeachers ||
+    selectedTeacher === null
 
   const handleRoleChange = (nextRole: UserRole) => {
     if (nextRole === role) {
@@ -437,94 +453,96 @@ export const ProfileEditor = ({
               </div>
             )}
 
-            <div className="profile-search-results">
-              {teacherResource.isLoading ? (
-                <div className="univer-skeleton-list">
-                  <div className="univer-skeleton-card" />
-                  <div className="univer-skeleton-card" />
-                </div>
-              ) : teacherResource.error ? (
-                <div className="univer-error-card">
-                  <p className="univer-error-text">
-                    {teacherResource.error}
-                  </p>
-                  <button
-                    type="button"
-                    className="univer-retry-button"
-                    onClick={teacherResource.reload}
-                  >
-                    Повторить поиск
-                  </button>
-                </div>
-              ) : hasTeacherQuery ? (
-                teacherResource.data.length > 0 ? (
-                  <div className="profile-teacher-list">
-                    {teacherResource.data.map((teacher) => {
-                      const isSelected =
-                        selectedTeacher?.employeeId === teacher.employeeId
-
-                      return (
-                        <button
-                          key={`${teacher.employeeId}:${teacher.urlId}`}
-                          type="button"
-                          className={`profile-teacher-option${
-                            isSelected
-                              ? ' profile-teacher-option--selected'
-                              : ''
-                          }`}
-                          onClick={() => {
-                            setSelectedTeacher(teacher)
-                            setTeacherQuery(teacher.fullName)
-                            setTouched((current) => ({
-                              ...current,
-                              teacher: true,
-                            }))
-                          }}
-                        >
-                          <div className="profile-teacher-option-avatar">
-                            {teacher.avatarUrl ? (
-                              <img
-                                src={teacher.avatarUrl}
-                                alt={teacher.fullName}
-                              />
-                            ) : (
-                              <span>{getInitials(teacher.fullName)}</span>
-                            )}
-                          </div>
-                          <div className="profile-teacher-option-content">
-                            <strong>{teacher.fullName}</strong>
-                            <span>
-                              {teacher.position || 'Преподаватель'}
-                              {teacher.department
-                                ? ` · ${teacher.department}`
-                                : ''}
-                            </span>
-                          </div>
-                        </button>
-                      )
-                    })}
+            {shouldRenderTeacherSearchResults && (
+              <div className="profile-search-results">
+                {teacherResource.isLoading ? (
+                  <div className="univer-skeleton-list">
+                    <div className="univer-skeleton-card" />
+                    <div className="univer-skeleton-card" />
                   </div>
+                ) : teacherResource.error ? (
+                  <div className="univer-error-card">
+                    <p className="univer-error-text">
+                      {teacherResource.error}
+                    </p>
+                    <button
+                      type="button"
+                      className="univer-retry-button"
+                      onClick={teacherResource.reload}
+                    >
+                      Повторить поиск
+                    </button>
+                  </div>
+                ) : shouldSearchTeachers ? (
+                  teacherResource.data.length > 0 ? (
+                    <div className="profile-teacher-list">
+                      {teacherResource.data.map((teacher) => {
+                        const isSelected =
+                          selectedTeacher?.employeeId === teacher.employeeId
+
+                        return (
+                          <button
+                            key={`${teacher.employeeId}:${teacher.urlId}`}
+                            type="button"
+                            className={`profile-teacher-option${
+                              isSelected
+                                ? ' profile-teacher-option--selected'
+                                : ''
+                            }`}
+                            onClick={() => {
+                              setSelectedTeacher(teacher)
+                              setTeacherQuery(teacher.fullName)
+                              setTouched((current) => ({
+                                ...current,
+                                teacher: true,
+                              }))
+                            }}
+                          >
+                            <div className="profile-teacher-option-avatar">
+                              {teacher.avatarUrl ? (
+                                <img
+                                  src={teacher.avatarUrl}
+                                  alt={teacher.fullName}
+                                />
+                              ) : (
+                                <span>{getInitials(teacher.fullName)}</span>
+                              )}
+                            </div>
+                            <div className="profile-teacher-option-content">
+                              <strong>{teacher.fullName}</strong>
+                              <span>
+                                {teacher.position || 'Преподаватель'}
+                                {teacher.department
+                                  ? ` · ${teacher.department}`
+                                  : ''}
+                              </span>
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <div className="univer-empty-card">
+                      <h3 className="univer-helper-title">
+                        Ничего не найдено
+                      </h3>
+                      <p className="univer-helper-subtitle">
+                        Уточните фамилию или попробуйте другой формат ФИО.
+                      </p>
+                    </div>
+                  )
                 ) : (
-                  <div className="univer-empty-card">
+                  <div className="univer-helper-card">
                     <h3 className="univer-helper-title">
-                      Ничего не найдено
+                      Начните поиск преподавателя
                     </h3>
                     <p className="univer-helper-subtitle">
-                      Уточните фамилию или попробуйте другой формат ФИО.
+                      Минимум 2 символа. После выбора профиль сохранится.
                     </p>
                   </div>
-                )
-              ) : (
-                <div className="univer-helper-card">
-                  <h3 className="univer-helper-title">
-                    Начните поиск преподавателя
-                  </h3>
-                  <p className="univer-helper-subtitle">
-                    Минимум 2 символа. После выбора профиль сохранится.
-                  </p>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
           </>
         )}
 

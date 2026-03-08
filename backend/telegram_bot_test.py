@@ -1,6 +1,9 @@
+import os
 import unittest
+from unittest.mock import patch
 
 from backend.telegram_bot import (
+    _read_text_env,
     TelegramBotApp,
     TelegramBotConfig,
     TelegramBotError,
@@ -37,8 +40,13 @@ class FakeTelegramBotClient:
         self.delete_webhook_calls: list[bool] = []
         self.updates_calls = 0
         self.fail_setup_once = False
+        self.fail_send_start_once = False
 
     def send_start_message(self, chat_id: int) -> None:
+        if self.fail_send_start_once:
+            self.fail_send_start_once = False
+            raise TelegramBotError("temporary send failure")
+
         self.sent_chat_ids.append(chat_id)
 
     def delete_webhook(self, drop_pending_updates: bool) -> None:
@@ -72,6 +80,17 @@ class FakeTelegramBotClient:
 
 
 class TelegramBotTests(unittest.TestCase):
+    def test_read_text_env_decodes_newline_escape_sequences(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"TELEGRAM_START_TEXT": "Line 1\\n\\nLine 2"},
+            clear=False,
+        ):
+            self.assertEqual(
+                _read_text_env("TELEGRAM_START_TEXT", "fallback"),
+                "Line 1\n\nLine 2",
+            )
+
     def test_extract_message_context_reads_message_payload(self) -> None:
         update = {
             "update_id": 1000,
@@ -165,6 +184,42 @@ class TelegramBotTests(unittest.TestCase):
         self.assertEqual(client.sent_chat_ids, [77])
         self.assertEqual(app.offset, 11)
 
+    def test_process_updates_does_not_advance_offset_when_send_fails(self) -> None:
+        client = FakeTelegramBotClient()
+        client.fail_send_start_once = True
+        app = TelegramBotApp(TEST_CONFIG, client=client)
+
+        with self.assertRaises(TelegramBotError):
+            app.process_updates(
+                [
+                    {
+                        "update_id": 10,
+                        "message": {
+                            "chat": {"id": 77},
+                            "text": "/start",
+                        },
+                    }
+                ]
+            )
+
+        self.assertEqual(client.sent_chat_ids, [])
+        self.assertIsNone(app.offset)
+
+        app.process_updates(
+            [
+                {
+                    "update_id": 10,
+                    "message": {
+                        "chat": {"id": 77},
+                        "text": "/start",
+                    },
+                }
+            ]
+        )
+
+        self.assertEqual(client.sent_chat_ids, [77])
+        self.assertEqual(app.offset, 11)
+
     def test_process_updates_ignores_plain_text(self) -> None:
         client = FakeTelegramBotClient()
         app = TelegramBotApp(TEST_CONFIG, client=client)
@@ -176,6 +231,25 @@ class TelegramBotTests(unittest.TestCase):
                     "message": {
                         "chat": {"id": 77},
                         "text": "hello",
+                    },
+                }
+            ]
+        )
+
+        self.assertEqual(client.sent_chat_ids, [])
+        self.assertEqual(app.offset, 11)
+
+    def test_process_updates_ignores_edited_messages(self) -> None:
+        client = FakeTelegramBotClient()
+        app = TelegramBotApp(TEST_CONFIG, client=client)
+
+        app.process_updates(
+            [
+                {
+                    "update_id": 10,
+                    "edited_message": {
+                        "chat": {"id": 77},
+                        "text": "/start",
                     },
                 }
             ]

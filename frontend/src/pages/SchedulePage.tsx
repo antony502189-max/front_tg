@@ -17,6 +17,10 @@ import {
   LessonCard,
   type LessonCardStatus,
 } from '../components/schedule/LessonCard'
+import {
+  DataRefreshBadge,
+  ScheduleLoadingState,
+} from '../components/loading/PageLoadingStates'
 import { useAsyncResource } from '../hooks/useAsyncResource'
 import { useScheduleStore, type Lesson } from '../store/scheduleStore'
 import { useUserStore } from '../store/userStore'
@@ -216,14 +220,17 @@ export const SchedulePage = () => {
   const {
     data,
     error,
-    isLoading,
-    hasResolvedCurrentRequest,
+    hasData,
+    isInitialLoading,
+    isRefreshing,
     reload,
+    updatedAt,
   } = useAsyncResource<ScheduleResponse | null>({
     enabled: hasIdentity && role !== null,
     requestKey,
     initialData: null,
     load: loadSchedule,
+    keepPreviousData: true,
     getErrorMessage: (requestError) =>
       getApiErrorMessage(
         requestError,
@@ -238,14 +245,14 @@ export const SchedulePage = () => {
   }, [clearSchedule, hasIdentity])
 
   useEffect(() => {
-    if (!hasResolvedCurrentRequest || !data) {
+    if (!data) {
       return
     }
 
     startTransition(() => {
       setSchedule(data.days)
     })
-  }, [data, hasResolvedCurrentRequest, setSchedule])
+  }, [data, setSchedule])
 
   const displayError = useMemo(() => {
     if (error) {
@@ -262,6 +269,8 @@ export const SchedulePage = () => {
 
     return null
   }, [error, normalizedGroupNumber, normalizedTeacherUrlId, role])
+  const blockingError = !hasData ? displayError : null
+  const refreshError = hasData ? error : null
 
   const rawDays = data?.days
   const visibleDays = useMemo<ScheduleDayView[]>(() => {
@@ -294,6 +303,19 @@ export const SchedulePage = () => {
       : normalizedGroupNumber
         ? `Группа ${normalizedGroupNumber}`
         : 'Группа не указана'
+  const refreshBadge = isRefreshing ? (
+    <DataRefreshBadge
+      label="Обновляем расписание"
+      updatedAt={updatedAt}
+      tone="loading"
+    />
+  ) : refreshError ? (
+    <DataRefreshBadge
+      label="Показаны сохраненные данные"
+      updatedAt={updatedAt}
+      tone="warning"
+    />
+  ) : null
 
   return (
     <div className="planner-page">
@@ -393,17 +415,17 @@ export const SchedulePage = () => {
           )}
         </section>
 
-        {isLoading && (
-          <div className="schedule-skeleton-list">
-            <div className="schedule-skeleton-card" />
-            <div className="schedule-skeleton-card" />
-            <div className="schedule-skeleton-card" />
+        {isInitialLoading && <ScheduleLoadingState />}
+
+        {refreshBadge && (
+          <div className="page-refresh-indicator-slot">
+            {refreshBadge}
           </div>
         )}
 
-        {!isLoading && displayError && (
+        {blockingError && !isInitialLoading && (
           <div className="schedule-error-card">
-            <p className="schedule-error-text">{displayError}</p>
+            <p className="schedule-error-text">{blockingError}</p>
             {hasIdentity && (
               <button
                 type="button"
@@ -416,7 +438,7 @@ export const SchedulePage = () => {
           </div>
         )}
 
-        {!isLoading && !displayError && (
+        {hasData && !blockingError && (
           <section className="schedule-day-groups">
             {hasLessons ? (
               visibleDays.map((day) => (

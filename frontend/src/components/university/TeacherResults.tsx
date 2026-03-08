@@ -56,6 +56,10 @@ export const TeacherResults = ({
   teachers,
   onRetry,
 }: TeacherResultsProps) => {
+  if (!hasQuery) {
+    return null
+  }
+
   if (isLoading) {
     return <UniversitySkeletonList />
   }
@@ -72,25 +76,17 @@ export const TeacherResults = ({
 
   return (
     <section className="univer-results-section">
-      {hasQuery ? (
-        teachers.length > 0 ? (
-          <div className="univer-results-list">
-            {teachers.map((employee) => (
-              <TeacherCard key={employee.id} employee={employee} />
-            ))}
-          </div>
-        ) : (
-          <UniversityTextCard
-            className="univer-empty-card"
-            title="Никого не найдено"
-            subtitle="Попробуйте изменить запрос или указать фамилию и имя полностью."
-          />
-        )
+      {teachers.length > 0 ? (
+        <div className="univer-results-list">
+          {teachers.map((employee) => (
+            <TeacherCard key={employee.id} employee={employee} />
+          ))}
+        </div>
       ) : (
         <UniversityTextCard
-          className="univer-helper-card"
-          title="Введите ФИО преподавателя"
-          subtitle="Введите минимум два символа."
+          className="univer-empty-card"
+          title="Никого не найдено"
+          subtitle="Попробуйте изменить запрос или указать фамилию и имя полностью."
         />
       )}
     </section>

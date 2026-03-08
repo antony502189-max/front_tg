@@ -422,6 +422,89 @@ def normalize_lookup_value(value: Any) -> str:
     return "".join(str(value).split()).lower()
 
 
+def split_employee_name_parts(value: Any) -> list[str]:
+    if value is None:
+        return []
+
+    normalized = str(value).strip().replace("Ё", "Е").replace("ё", "е")
+    if not normalized:
+        return []
+
+    return [
+        part
+        for part in re.split(r"[\s,.;:()/_-]+", normalized)
+        if part
+    ]
+
+
+def normalize_employee_search_value(value: Any) -> str:
+    return "".join(
+        part.casefold() for part in split_employee_name_parts(value)
+    )
+
+
+def build_employee_search_signature(value: Any) -> str:
+    parts = split_employee_name_parts(value)
+    if not parts:
+        return ""
+
+    surname = parts[0].casefold()
+    initials = "".join(
+        part[:1].casefold() for part in parts[1:] if part
+    )
+    return f"{surname}{initials}"
+
+
+def build_employee_search_candidates(query_value: str) -> list[str]:
+    trimmed = query_value.strip()
+    if not trimmed:
+        return []
+
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    def add_candidate(candidate: str) -> None:
+        normalized_candidate = candidate.strip()
+        if not normalized_candidate:
+            return
+        key = normalized_candidate.casefold()
+        if key in seen:
+            return
+        seen.add(key)
+        candidates.append(normalized_candidate)
+
+    add_candidate(trimmed)
+
+    parts = split_employee_name_parts(trimmed)
+    if not parts:
+        return candidates
+
+    add_candidate(" ".join(parts))
+
+    if len(parts) > 1:
+        add_candidate(f"{parts[0]} {''.join(parts[1:])}")
+
+    add_candidate(parts[0])
+    return candidates
+
+
+def employee_matches_search_query(full_name: Any, query_value: str) -> bool:
+    normalized_query = normalize_employee_search_value(query_value)
+    if not normalized_query:
+        return True
+
+    normalized_name = normalize_employee_search_value(full_name)
+    if normalized_name.startswith(normalized_query):
+        return True
+
+    query_signature = build_employee_search_signature(query_value)
+    if not query_signature:
+        return False
+
+    name_signature = build_employee_search_signature(full_name)
+    return name_signature.startswith(query_signature)
+
+
 def first_finite_number(*values: Any) -> float | None:
     for value in values:
         if isinstance(value, bool):
@@ -1788,11 +1871,36 @@ class BackendApp:
         )
 
     def _build_employees_payload(self, query_value: str) -> JsonValue:
-        employees_payload = self.request_upstream(
-            "/employees/fio",
-            {"employee-fio": query_value},
-        )
-        return normalize_employees_response(employees_payload, self.config)
+        search_candidates = build_employee_search_candidates(query_value)
+
+        for index, candidate in enumerate(search_candidates):
+            employees_payload = self.request_upstream(
+                "/employees/fio",
+                {"employee-fio": candidate},
+            )
+            normalized_payload = normalize_employees_response(
+                employees_payload,
+                self.config,
+            )
+
+            if not normalized_payload:
+                continue
+
+            if index == 0:
+                return normalized_payload
+
+            filtered_payload = [
+                employee
+                for employee in normalized_payload
+                if employee_matches_search_query(
+                    employee.get("fullName"),
+                    query_value,
+                )
+            ]
+            if filtered_payload:
+                return filtered_payload
+
+        return []
 
     def _build_auditories_payload(self, query_value: str) -> JsonValue:
         auditories_payload = self.request_upstream("/auditories", {})

@@ -177,6 +177,7 @@ npm run test:backend
 - `TELEGRAM_RETRY_DELAY_MS`
 - `TELEGRAM_DROP_PENDING_UPDATES`
 - `TELEGRAM_SET_CHAT_MENU_BUTTON`
+- `TELEGRAM_START_TEXT` (`\n` можно использовать для переносов строк в приветственном сообщении `/start`)
 
 ## Коротко по сути
 

@@ -1534,6 +1534,59 @@ class BackendServerTests(unittest.TestCase):
         self.assertEqual(response.payload[0]["employeeId"], "15")
         self.assertEqual(response.payload[0]["urlId"], "petrov-p-p")
 
+    def test_employee_search_falls_back_for_initials_with_punctuation(self) -> None:
+        seen_queries: list[str] = []
+
+        def fetcher(path: str, params: dict[str, str]):
+            self.assertEqual(path, "/employees/fio")
+            query = params["employee-fio"]
+            seen_queries.append(query)
+
+            if query == "Кедо Е.С.":
+                return {"value": []}
+
+            if query == "Кедо Е С":
+                return {
+                    "value": [
+                        {
+                            "id": 21,
+                            "urlId": "kedo-e-s",
+                            "fio": "Кедо Е. С.",
+                        },
+                        {
+                            "id": 22,
+                            "urlId": "kedo-a-s",
+                            "fio": "Кедо А. С.",
+                        },
+                    ]
+                }
+
+            raise AssertionError(f"Unexpected query: {query}")
+
+        app = BackendApp(config=TEST_CONFIG, fetcher=fetcher)
+
+        response = app.handle_request(
+            "GET",
+            "/api/search-employee?query=Кедо%20Е.С.",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.payload,
+            [
+                {
+                    "id": "kedo-e-s",
+                    "employeeId": "21",
+                    "urlId": "kedo-e-s",
+                    "fullName": "Кедо Е. С.",
+                    "position": None,
+                    "department": None,
+                    "avatarUrl": "https://iis.bsuir.by/api/v1/employees/photo/21",
+                }
+            ],
+        )
+        self.assertEqual(seen_queries, ["Кедо Е.С.", "Кедо Е С"])
+
     def test_teacher_schedule_route_uses_teacher_url_id(self) -> None:
         seen_paths: list[str] = []
 
