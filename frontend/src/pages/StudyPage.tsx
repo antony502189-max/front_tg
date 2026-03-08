@@ -9,7 +9,7 @@ import {
 } from '../components/loading/PageLoadingStates'
 import { useAsyncResource } from '../hooks/useAsyncResource'
 import { useUserStore } from '../store/userStore'
-import { buildSubjectRating, formatMarksLabel } from '../utils/study'
+import { buildStudyOverview, formatMarksLabel } from '../utils/study'
 
 const EMPTY_SUBJECTS: GradesResponse['subjects'] = []
 
@@ -98,14 +98,24 @@ export const StudyPage = () => {
   const summary = data?.summary
   const subjects = data?.subjects ?? EMPTY_SUBJECTS
   const warning = data?.warning
-  const rating = useMemo(
-    () => buildSubjectRating(subjects).slice(0, 5),
+  const { subjectSummaries, rating } = useMemo(
+    () => {
+      const overview = buildStudyOverview(subjects)
+
+      return {
+        subjectSummaries: overview.subjectSummaries,
+        rating: overview.rating.slice(0, 5),
+      }
+    },
     [subjects],
   )
   const specialityLabel =
     summary?.speciality ?? 'Специальность не определена'
   const positionLabel = summary?.position ?? '—'
   const averageLabel = summary?.average?.toFixed(1) ?? '—'
+  const studyMetaLabel = normalizedGroupNumber
+    ? `Группа ${normalizedGroupNumber}`
+    : 'Группа не указана'
   const studyStatusLabel = isRefreshing
     ? 'Обновляем данные'
     : refreshError
@@ -125,7 +135,7 @@ export const StudyPage = () => {
             <div>
               <h1 className="planner-title">Учёба</h1>
               <p className="planner-subtitle">
-                Для преподавателя не нужны отмеки. Вы свое отучились).
+                Для преподавателя раздел с оценками не нужен.
               </p>
             </div>
           </header>
@@ -168,9 +178,7 @@ export const StudyPage = () => {
 
           <div className="study-student-copy">
             <p className="study-student-subtitle study-student-subtitle--meta">
-              {groupNumber.trim()
-                ? `Группа ${groupNumber.trim()}`
-                : 'Группа не указана'}
+              {studyMetaLabel}
               {' · '}
               Зачётка {normalizedStudentCardNumber || 'не указана'}
             </p>
@@ -230,7 +238,6 @@ export const StudyPage = () => {
           </div>
 
           <div className="study-student-footnote">
-            <span className="study-student-footnote-dot" aria-hidden="true" />
             <span>Специальность, рейтинг и средний балл обновляются из IIS.</span>
           </div>
         </section>
@@ -286,19 +293,9 @@ export const StudyPage = () => {
             <section className="study-subjects-section">
               <h2 className="study-section-title">Оценки по предметам</h2>
 
-              {subjects.length > 0 ? (
+              {subjectSummaries.length > 0 ? (
                 <div className="study-subject-list">
-                  {subjects.map((subject) => {
-                    const subjectAverage =
-                      subject.marks.length > 0
-                        ? (
-                            subject.marks.reduce(
-                              (sum, mark) => sum + mark.value,
-                              0,
-                            ) / subject.marks.length
-                          ).toFixed(1)
-                        : null
-
+                  {subjectSummaries.map((subject) => {
                     return (
                       <article
                         key={subject.id}
@@ -321,7 +318,7 @@ export const StudyPage = () => {
                               Средний
                             </span>
                             <strong className="study-subject-summary-value">
-                              {subjectAverage ?? '?'}
+                              {subject.average?.toFixed(1) ?? '?'}
                             </strong>
                           </div>
                         </header>

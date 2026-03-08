@@ -8,6 +8,17 @@ export type SubjectRating = {
   marksCount: number
 }
 
+export type StudySubjectSummary =
+  GradesResponse['subjects'][number] & {
+    average: number | null
+    marksCount: number
+  }
+
+export type StudyOverview = {
+  subjectSummaries: StudySubjectSummary[]
+  rating: SubjectRating[]
+}
+
 export const formatMarksLabel = (count: number) => {
   const remainder100 = count % 100
 
@@ -28,9 +39,10 @@ export const formatMarksLabel = (count: number) => {
   return 'оценок'
 }
 
-export const buildSubjectRating = (
+export const buildStudyOverview = (
   subjects: GradesResponse['subjects'],
-): SubjectRating[] => {
+): StudyOverview => {
+  const subjectSummaries: StudySubjectSummary[] = []
   const rating: SubjectRating[] = []
 
   for (const subject of subjects) {
@@ -46,7 +58,15 @@ export const buildSubjectRating = (
       marksCount += 1
     }
 
-    if (!marksCount) {
+    const average = marksCount > 0 ? total / marksCount : null
+
+    subjectSummaries.push({
+      ...subject,
+      average,
+      marksCount,
+    })
+
+    if (average === null) {
       continue
     }
 
@@ -54,7 +74,7 @@ export const buildSubjectRating = (
       id: subject.id,
       subject: subject.subject,
       teacher: subject.teacher,
-      average: total / marksCount,
+      average,
       marksCount,
     })
   }
@@ -71,5 +91,8 @@ export const buildSubjectRating = (
     return left.subject.localeCompare(right.subject, 'ru')
   })
 
-  return rating
+  return {
+    subjectSummaries,
+    rating,
+  }
 }
