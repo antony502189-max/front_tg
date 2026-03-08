@@ -1553,17 +1553,6 @@ body {
   gap: 14px;
 }
 
-.onboarding-intro {
-  padding: 16px 18px;
-  border-radius: 22px;
-  background:
-    linear-gradient(135deg, rgba(14, 165, 233, 0.14), rgba(255, 255, 255, 0.72)),
-    var(--app-surface);
-  border: 1px solid rgba(14, 165, 233, 0.16);
-  box-shadow: var(--app-shadow-soft);
-}
-
-.onboarding-kicker,
 .schedule-kicker,
 .study-kicker,
 .univer-kicker {
@@ -1580,20 +1569,12 @@ body {
   text-transform: uppercase;
 }
 
-.onboarding-kicker,
 .schedule-kicker {
   color: #0f766e;
 }
 
 .study-kicker {
   color: #0b3a8f;
-}
-
-.onboarding-lead {
-  margin: 10px 0 0;
-  font-size: 14px;
-  line-height: 1.6;
-  color: color-mix(in srgb, var(--tg-text-color) 74%, var(--tg-hint-color) 26%);
 }
 
 .profile-editor-card {
@@ -2538,7 +2519,6 @@ body {
   color: var(--app-text-muted);
 }
 
-.onboarding-kicker,
 .schedule-kicker,
 .study-kicker,
 .univer-kicker,
