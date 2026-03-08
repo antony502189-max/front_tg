@@ -304,11 +304,11 @@ export const SchedulePage = () => {
               {role === 'teacher' ? 'Преподаватель' : 'Студент'}
             </span>
             <h1 className="planner-title">Расписание</h1>
-            <p className="planner-subtitle">
-              {role === 'teacher'
-                ? 'Смотрите расписание через backend по urlId преподавателя.'
-                : 'Смотрите расписание через backend по номеру вашей учебной группы.'}
-            </p>
+            {role !== 'teacher' && (
+              <p className="planner-subtitle">
+                Смотрите расписание через backend по номеру вашей учебной группы.
+              </p>
+            )}
           </div>
 
           <div className="schedule-identity-card">

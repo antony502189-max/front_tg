@@ -90,7 +90,7 @@ export const TeacherResults = ({
         <UniversityTextCard
           className="univer-helper-card"
           title="Введите ФИО преподавателя"
-          subtitle="Введите минимум два символа, чтобы backend смог выполнить поиск через IIS API."
+          subtitle="Введите минимум два символа."
         />
       )}
     </section>
