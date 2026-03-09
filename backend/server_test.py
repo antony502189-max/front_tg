@@ -522,7 +522,7 @@ class BackendServerTests(unittest.TestCase):
                         "startLessonTime": "10:00",
                         "endLessonTime": "11:25",
                         "weekNumber": [3],
-                        "numSubgroup": "1",
+                        "numSubgroup": 1,
                         "startLessonDate": "01.01.2026",
                         "endLessonDate": "31.12.2026",
                     },
@@ -531,7 +531,7 @@ class BackendServerTests(unittest.TestCase):
                         "startLessonTime": "12:00",
                         "endLessonTime": "13:25",
                         "weekNumber": [3],
-                        "numSubgroup": "2",
+                        "numSubgroup": 2,
                         "startLessonDate": "01.01.2026",
                         "endLessonDate": "31.12.2026",
                     },
@@ -723,15 +723,15 @@ class BackendServerTests(unittest.TestCase):
                                 "startLessonDate": "01.01.2026",
                                 "endLessonDate": "31.12.2026",
                             },
-                            {
-                                "subject": "Для 2-й подгруппы",
-                                "startLessonTime": "10:00",
-                                "endLessonTime": "11:25",
-                                "weekNumber": [3],
-                                "numSubgroup": "2",
-                                "startLessonDate": "01.01.2026",
-                                "endLessonDate": "31.12.2026",
-                            },
+                    {
+                        "subject": "Для 2-й подгруппы",
+                        "startLessonTime": "10:00",
+                        "endLessonTime": "11:25",
+                        "weekNumber": [3],
+                        "numSubgroup": 2,
+                        "startLessonDate": "01.01.2026",
+                        "endLessonDate": "31.12.2026",
+                    },
                         ]
                     }
                 }

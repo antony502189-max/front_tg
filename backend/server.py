@@ -725,12 +725,17 @@ def normalize_subgroup(value: Any) -> str:
 
 
 def extract_lesson_subgroups(raw_lesson: dict[str, Any]) -> set[str]:
-    raw_subgroup = first_non_empty_field(
-        raw_lesson,
-        "numSubgroup",
-        "subgroup",
-        "subGroup",
-    )
+    raw_subgroup: Any = None
+    for field in ("numSubgroup", "subgroup", "subGroup"):
+        if field not in raw_lesson:
+            continue
+        candidate = raw_lesson.get(field)
+        if candidate is None:
+            continue
+        if isinstance(candidate, str) and not candidate.strip():
+            continue
+        raw_subgroup = candidate
+        break
 
     values: list[str] = []
     if isinstance(raw_subgroup, list):
