@@ -724,24 +724,42 @@ def normalize_subgroup(value: Any) -> str:
     return "all"
 
 
-def lesson_matches_subgroup(raw_lesson: dict[str, Any], subgroup: str) -> bool:
-    if subgroup == "all":
-        return True
-
+def extract_lesson_subgroups(raw_lesson: dict[str, Any]) -> set[str]:
     raw_subgroup = first_non_empty_field(
         raw_lesson,
         "numSubgroup",
         "subgroup",
         "subGroup",
     )
-    if raw_subgroup is None:
+
+    values: list[str] = []
+    if isinstance(raw_subgroup, list):
+        values = [str(item) for item in raw_subgroup]
+    elif raw_subgroup is not None:
+        values = [str(raw_subgroup)]
+
+    result: set[str] = set()
+    for value in values:
+        normalized = value.strip()
+        if not normalized:
+            continue
+        if "1" in normalized:
+            result.add("1")
+        if "2" in normalized:
+            result.add("2")
+
+    return result
+
+
+def lesson_matches_subgroup(raw_lesson: dict[str, Any], subgroup: str) -> bool:
+    if subgroup == "all":
         return True
 
-    normalized = str(raw_subgroup).strip()
-    if not normalized:
+    lesson_subgroups = extract_lesson_subgroups(raw_lesson)
+    if not lesson_subgroups:
         return True
 
-    return subgroup in normalized
+    return subgroup in lesson_subgroups
 
 
 def normalize_schedule_lesson(
@@ -780,6 +798,12 @@ def normalize_schedule_lesson(
     start_time = first_non_empty_field(raw_lesson, "startLessonTime") or ""
     end_time = first_non_empty_field(raw_lesson, "endLessonTime") or ""
     date_value = lesson_date.isoformat()
+    lesson_subgroups = extract_lesson_subgroups(raw_lesson)
+    subgroup = (
+        next(iter(lesson_subgroups))
+        if len(lesson_subgroups) == 1
+        else None
+    )
 
     return {
         "id": str(
@@ -795,6 +819,7 @@ def normalize_schedule_lesson(
         "startTime": start_time,
         "endTime": end_time,
         "date": date_value,
+        "subgroup": subgroup,
     }
 
 
