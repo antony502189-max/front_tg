@@ -9,7 +9,10 @@ import {
 } from '../components/loading/PageLoadingStates'
 import { useAsyncResource } from '../hooks/useAsyncResource'
 import { useUserStore } from '../store/userStore'
-import { buildStudyOverview, formatMarksLabel } from '../utils/study'
+import {
+  buildStudyOverview,
+  formatMarksLabel,
+} from '../utils/study'
 
 const EMPTY_SUBJECTS: GradesResponse['subjects'] = []
 
@@ -323,22 +326,47 @@ export const StudyPage = () => {
                           </div>
                         </header>
 
-                        <div className="study-marks-row">
-                          {subject.marks.length > 0 ? (
-                            subject.marks.map((mark, index) => (
-                              <span
-                                key={`${subject.id}:${index}:${mark.value}`}
-                                className={`study-mark-badge study-mark-badge--${getMarkTone(mark.value)}`}
-                              >
-                                {mark.value}
-                              </span>
-                            ))
+                        {subject.marks.length > 0 ? (
+                          subject.hasTypedMarks ? (
+                            <div className="study-mark-groups">
+                              {subject.markGroups.map((group) => (
+                                <div
+                                  key={`${subject.id}:${group.key}`}
+                                  className="study-mark-group"
+                                >
+                                  <span className="study-mark-group-label">
+                                    {group.label}
+                                  </span>
+                                  <div className="study-marks-row">
+                                    {group.marks.map((mark, index) => (
+                                      <span
+                                        key={`${subject.id}:${group.key}:${index}:${mark.value}`}
+                                        className={`study-mark-badge study-mark-badge--${getMarkTone(mark.value)}`}
+                                      >
+                                        {mark.value}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
                           ) : (
-                            <span className="study-no-marks">
-                              Оценок пока нет
-                            </span>
-                          )}
-                        </div>
+                            <div className="study-marks-row">
+                              {subject.marks.map((mark, index) => (
+                                <span
+                                  key={`${subject.id}:${index}:${mark.value}`}
+                                  className={`study-mark-badge study-mark-badge--${getMarkTone(mark.value)}`}
+                                >
+                                  {mark.value}
+                                </span>
+                              ))}
+                            </div>
+                          )
+                        ) : (
+                          <span className="study-no-marks">
+                            Оценок пока нет
+                          </span>
+                        )}
                       </article>
                     )
                   })}

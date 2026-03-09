@@ -770,12 +770,31 @@ class RatingService:
                     )
                 )
 
+        candidate_batches = [rating_candidates]
         if inferred_course is not None:
-            rating_candidates.sort(
-                key=lambda candidate: candidate.course != inferred_course
-            )
+            preferred_candidates = [
+                candidate
+                for candidate in rating_candidates
+                if candidate.course == inferred_course
+            ]
+            fallback_candidates = [
+                candidate
+                for candidate in rating_candidates
+                if candidate.course != inferred_course
+            ]
+            candidate_batches = [
+                batch for batch in (preferred_candidates, fallback_candidates) if batch
+            ]
 
-        summary = self._scan_rating_candidates(student_card_number, rating_candidates)
+        summary = None
+        for candidate_batch in candidate_batches:
+            summary = self._scan_rating_candidates(
+                student_card_number,
+                candidate_batch,
+            )
+            if summary is not None:
+                break
+
         if summary is not None:
             summary = dict(summary)
             summary["speciality"] = resolve_speciality_name(

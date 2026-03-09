@@ -1549,16 +1549,50 @@ def normalize_course_values(payload: Any) -> list[int]:
     return normalized_courses
 
 
-def normalize_mark(raw_mark: Any) -> dict[str, Any] | None:
+MARK_DATE_FIELDS = ("date", "markDate", "lessonDate", "createdAt")
+MARK_TYPE_FIELDS = (
+    "lessonTypeAbbrev",
+    "lessonType",
+    "controlTypeAbbrev",
+    "controlType",
+    "typeAbbrev",
+    "type",
+)
+
+
+def build_normalized_mark(
+    numeric_value: float,
+    *,
+    mark_date: str | None = None,
+    mark_type: str | None = None,
+) -> dict[str, Any]:
+    mark: dict[str, Any] = {"value": numeric_value}
+
+    if mark_date is not None:
+        mark["date"] = mark_date
+    if mark_type is not None:
+        mark["type"] = mark_type
+
+    return mark
+
+
+def normalize_mark(
+    raw_mark: Any,
+    *,
+    fallback_type: str | None = None,
+) -> dict[str, Any] | None:
     if isinstance(raw_mark, bool):
         return None
 
     if isinstance(raw_mark, (int, float)) and math.isfinite(raw_mark):
-        return {"value": float(raw_mark)}
+        return build_normalized_mark(float(raw_mark), mark_type=fallback_type)
 
     if isinstance(raw_mark, str):
         try:
-            return {"value": float(raw_mark.replace(",", "."))}
+            return build_normalized_mark(
+                float(raw_mark.replace(",", ".")),
+                mark_type=fallback_type,
+            )
         except ValueError:
             return None
 
@@ -1576,18 +1610,19 @@ def normalize_mark(raw_mark: Any) -> dict[str, Any] | None:
     if numeric_value is None:
         return None
 
-    mark = {"value": numeric_value}
     mark_date = first_non_empty_string(
-        raw_mark.get("date"),
-        raw_mark.get("markDate"),
-        raw_mark.get("lessonDate"),
-        raw_mark.get("createdAt"),
+        *(raw_mark.get(field) for field in MARK_DATE_FIELDS)
+    )
+    mark_type = first_non_empty_string(
+        *(raw_mark.get(field) for field in MARK_TYPE_FIELDS),
+        fallback_type,
     )
 
-    if mark_date is not None:
-        mark["date"] = mark_date
-
-    return mark
+    return build_normalized_mark(
+        numeric_value,
+        mark_date=mark_date,
+        mark_type=mark_type,
+    )
 
 
 def extract_marks_from_item(
@@ -1598,17 +1633,21 @@ def extract_marks_from_item(
     date_fields: tuple[str, ...] = (),
 ) -> list[dict[str, Any]]:
     mark_date = first_non_empty_field(raw, *date_fields) if date_fields else None
+    mark_type = first_non_empty_field(
+        raw,
+        *MARK_TYPE_FIELDS[:-1],
+    )
     raw_marks = first_list_field(raw, *raw_mark_fields)
     marks: list[dict[str, Any]] = []
 
     if raw_marks is not None:
         for raw_mark in raw_marks:
-            normalized_mark = normalize_mark(raw_mark)
+            normalized_mark = normalize_mark(raw_mark, fallback_type=mark_type)
             if normalized_mark is None:
                 continue
 
             if mark_date is not None and "date" not in normalized_mark:
-                normalized_mark = {**normalized_mark, "date": mark_date}
+                normalized_mark["date"] = mark_date
 
             marks.append(normalized_mark)
 
@@ -1619,11 +1658,13 @@ def extract_marks_from_item(
     if average_mark is None:
         return []
 
-    mark: dict[str, Any] = {"value": average_mark}
-    if mark_date is not None:
-        mark["date"] = mark_date
-
-    return [mark]
+    return [
+        build_normalized_mark(
+            average_mark,
+            mark_date=mark_date,
+            mark_type=mark_type,
+        )
+    ]
 
 
 def extract_grade_subject_name(

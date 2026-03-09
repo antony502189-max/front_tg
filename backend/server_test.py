@@ -1254,14 +1254,45 @@ class BackendServerTests(unittest.TestCase):
         self.assertEqual(
             subjects[0]["marks"],
             [
-                {"value": 8.0, "date": "13.02.2026"},
-                {"value": 10.0, "date": "16.02.2026"},
+                {"value": 8.0, "date": "13.02.2026", "type": "ПЗ"},
+                {"value": 10.0, "date": "16.02.2026", "type": "ПЗ"},
             ],
         )
         self.assertEqual(subjects[1]["subject"], "Физика")
         self.assertEqual(
             subjects[1]["marks"],
-            [{"value": 9.0, "date": "19.02.2026"}],
+            [{"value": 9.0, "date": "19.02.2026", "type": "ПЗ"}],
+        )
+
+    def test_extract_grade_subjects_preserves_mark_type_from_mark_payload(self) -> None:
+        payload = {
+            "subjects": [
+                {
+                    "id": "math",
+                    "disciplineName": "Математика",
+                    "marks": [
+                        {
+                            "value": 9,
+                            "type": "ПЗ",
+                        },
+                        {
+                            "value": 8,
+                            "controlTypeAbbrev": "ЛК",
+                        },
+                    ],
+                }
+            ]
+        }
+
+        subjects = extract_grade_subjects(payload)
+
+        self.assertEqual(len(subjects), 1)
+        self.assertEqual(
+            subjects[0]["marks"],
+            [
+                {"value": 9.0, "type": "ПЗ"},
+                {"value": 8.0, "type": "ЛК"},
+            ],
         )
 
     def test_grades_route_handles_partial_upstream_failure(self) -> None:
@@ -1803,12 +1834,14 @@ class BackendServerTests(unittest.TestCase):
                         {
                             "id": 1,
                             "lessonNameAbbrev": "МА",
+                            "lessonTypeAbbrev": "ПЗ",
                             "dateString": "13.02.2026",
                             "marks": [8],
                         },
                         {
                             "id": 2,
                             "lessonNameAbbrev": "МА",
+                            "lessonTypeAbbrev": "ПЗ",
                             "dateString": "16.02.2026",
                             "marks": [10],
                         },
@@ -1828,8 +1861,8 @@ class BackendServerTests(unittest.TestCase):
         self.assertEqual(
             response.payload["subjects"][0]["marks"],
             [
-                {"value": 8.0, "date": "13.02.2026"},
-                {"value": 10.0, "date": "16.02.2026"},
+                {"value": 8.0, "date": "13.02.2026", "type": "ПЗ"},
+                {"value": 10.0, "date": "16.02.2026", "type": "ПЗ"},
             ],
         )
 

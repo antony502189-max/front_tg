@@ -373,6 +373,8 @@ export const SchedulePage = () => {
     previewTeacher?.employeeId.trim() ?? ''
   const isTeacherPreview = previewTeacherUrlId.length > 0
   const effectiveRole = isTeacherPreview ? 'teacher' : role
+  const resolvedView =
+    effectiveRole !== 'teacher' && view === 'semester' ? 'week' : view
   const activeTeacherUrlId = isTeacherPreview
     ? previewTeacherUrlId
     : normalizedTeacherUrlId
@@ -422,15 +424,6 @@ export const SchedulePage = () => {
     previousPreviewTeacherIdRef.current = activeTeacherUrlId
   }, [activeTeacherUrlId, isTeacherPreview, role, todayKey])
 
-  useEffect(() => {
-    if (
-      effectiveRole !== 'teacher' &&
-      view === 'semester'
-    ) {
-      setView('week')
-    }
-  }, [effectiveRole, view])
-
   const requestKey =
     effectiveRole && hasIdentity
       ? [
@@ -441,7 +434,7 @@ export const SchedulePage = () => {
           activeTeacherEmployeeId,
           effectiveSubgroup,
           selectedWeek ?? 'auto',
-          view,
+          resolvedView,
           referenceDate,
         ].join(':')
       : null
@@ -450,7 +443,7 @@ export const SchedulePage = () => {
     (signal: AbortSignal) => {
       if (!effectiveRole) {
         return Promise.resolve<ScheduleResponse>({
-          view,
+          view: resolvedView,
           currentWeek: 1,
           selectedWeek: selectedWeek ?? 1,
           rangeStart: referenceDate,
@@ -463,7 +456,7 @@ export const SchedulePage = () => {
         {
           role: effectiveRole,
           date: referenceDate,
-          view,
+          view: resolvedView,
           groupNumber: normalizedGroupNumber,
           teacherUrlId: activeTeacherUrlId,
           teacherEmployeeId: activeTeacherEmployeeId,
@@ -480,8 +473,8 @@ export const SchedulePage = () => {
       effectiveSubgroup,
       normalizedGroupNumber,
       referenceDate,
+      resolvedView,
       selectedWeek,
-      view,
     ],
   )
 
@@ -565,17 +558,17 @@ export const SchedulePage = () => {
       }
     })
 
-    if (view === 'day' || view === 'semester') {
+    if (resolvedView === 'day' || resolvedView === 'semester') {
       return mappedDays
     }
 
     return mappedDays.filter((day) => day.lessons.length > 0)
-  }, [rawDays, view])
+  }, [rawDays, resolvedView])
 
   const rangeLabel = formatScheduleRange(
     data?.rangeStart ?? referenceDate,
     data?.rangeEnd ?? referenceDate,
-    view,
+    resolvedView,
   )
   const currentScheduleWeek = data?.currentWeek ?? null
   const activeScheduleWeek =
@@ -682,7 +675,7 @@ export const SchedulePage = () => {
         <section className="schedule-toolbar">
           <div className="schedule-view-toggle" role="tablist">
             {viewOptions.map((option) => {
-              const isActive = view === option.value
+              const isActive = resolvedView === option.value
 
               return (
                 <button
@@ -694,7 +687,7 @@ export const SchedulePage = () => {
                     isActive ? ' schedule-view-chip--active' : ''
                   }`}
                   onClick={() => {
-                    if (option.value === view) {
+                    if (option.value === resolvedView) {
                       return
                     }
 
@@ -787,7 +780,7 @@ export const SchedulePage = () => {
               type="button"
               className="schedule-period-button"
               onClick={() =>
-                setReferenceDate(shiftDateKey(referenceDate, view, -1))
+                setReferenceDate(shiftDateKey(referenceDate, resolvedView, -1))
               }
               aria-label="Предыдущий период"
             >
@@ -796,11 +789,11 @@ export const SchedulePage = () => {
 
             <div className="schedule-period-copy">
               <span className="schedule-period-label">
-                {view === 'day'
+                {resolvedView === 'day'
                   ? 'Выбранный день'
-                  : view === 'week'
+                  : resolvedView === 'week'
                     ? 'Текущая неделя'
-                    : view === 'month'
+                    : resolvedView === 'month'
                       ? 'Текущий месяц'
                       : 'До конца семестра'}
               </span>
@@ -811,7 +804,7 @@ export const SchedulePage = () => {
               type="button"
               className="schedule-period-button"
               onClick={() =>
-                setReferenceDate(shiftDateKey(referenceDate, view, 1))
+                setReferenceDate(shiftDateKey(referenceDate, resolvedView, 1))
               }
               aria-label="Следующий период"
             >

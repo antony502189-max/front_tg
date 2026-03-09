@@ -1,6 +1,7 @@
 export type GradeMark = {
   value: number
   date?: string
+  type?: string
 }
 
 export type SubjectGrades = {

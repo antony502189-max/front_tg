@@ -796,6 +796,28 @@ button {
   gap: 6px;
 }
 
+.study-mark-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.study-mark-group {
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  gap: 10px;
+  align-items: start;
+}
+
+.study-mark-group-label {
+  padding-top: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--tg-hint-color);
+}
+
 .study-mark-badge {
   min-width: 24px;
   height: 24px;
@@ -2374,6 +2396,28 @@ body {
 .study-subject-summary-value {
   font-size: 20px;
   font-weight: 800;
+}
+
+.study-mark-groups {
+  margin-top: 14px;
+}
+
+.study-mark-group {
+  grid-template-columns: 52px 1fr;
+}
+
+.study-mark-group-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: 12px;
+  background: rgba(14, 165, 233, 0.08);
+  color: #0b3a8f;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
 }
 
 .study-mark-badge {
