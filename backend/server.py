@@ -717,6 +717,33 @@ def lesson_matches_date(raw_lesson: dict[str, Any], lesson_date: date) -> bool:
     return True
 
 
+def normalize_subgroup(value: Any) -> str:
+    normalized = str(value).strip() if value is not None else ""
+    if normalized in {"1", "2"}:
+        return normalized
+    return "all"
+
+
+def lesson_matches_subgroup(raw_lesson: dict[str, Any], subgroup: str) -> bool:
+    if subgroup == "all":
+        return True
+
+    raw_subgroup = first_non_empty_field(
+        raw_lesson,
+        "numSubgroup",
+        "subgroup",
+        "subGroup",
+    )
+    if raw_subgroup is None:
+        return True
+
+    normalized = str(raw_subgroup).strip()
+    if not normalized:
+        return True
+
+    return subgroup in normalized
+
+
 def normalize_schedule_lesson(
     raw_lesson: dict[str, Any],
     lesson_date: date,
@@ -778,6 +805,7 @@ def normalize_schedule_response(
     *,
     reference_date: date | None = None,
     view: str = "week",
+    subgroup: str = "all",
 ) -> dict[str, Any]:
     schedules = payload.get("schedules") if isinstance(payload, dict) else None
     normalized_view = normalize_schedule_view(view)
@@ -815,6 +843,8 @@ def normalize_schedule_response(
                 if not lesson_matches_week(item, lesson_week):
                     continue
                 if not lesson_matches_date(item, lesson_date):
+                    continue
+                if not lesson_matches_subgroup(item, subgroup):
                     continue
                 lessons.append(
                     normalize_schedule_lesson(item, lesson_date, index)
@@ -1858,6 +1888,7 @@ class BackendApp:
         teacher_employee_id: str | None = None,
         reference_date: date | None = None,
         view: str = "week",
+        subgroup: str = "all",
     ) -> JsonValue:
         today_value = self.today()
         normalized_view = normalize_schedule_view(view)
@@ -1884,6 +1915,7 @@ class BackendApp:
             today_value,
             reference_date=reference_date or today_value,
             view=normalized_view,
+            subgroup=normalize_subgroup(subgroup),
         )
 
     def _build_free_auditories_payload(
@@ -2189,6 +2221,7 @@ class BackendApp:
             "teacherEmployeeId",
             "employeeId",
         )
+        subgroup = normalize_subgroup(first_query_value(parsed_url, "subgroup"))
 
         if student_group is None and teacher_url_id is None:
             return Response(
@@ -2204,6 +2237,7 @@ class BackendApp:
             "studentGroup": student_group or "",
             "teacherUrlId": teacher_url_id or "",
             "teacherEmployeeId": teacher_employee_id or "",
+            "subgroup": subgroup,
             "view": view,
             "date": reference_date.isoformat(),
         }
@@ -2217,6 +2251,7 @@ class BackendApp:
                 teacher_employee_id=teacher_employee_id,
                 reference_date=reference_date,
                 view=view,
+                subgroup=subgroup,
             ),
         )
 

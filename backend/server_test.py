@@ -504,6 +504,55 @@ class BackendServerTests(unittest.TestCase):
         self.assertEqual(normalized["days"][0]["date"], "2026-03-09")
         self.assertEqual(normalized["days"][-1]["date"], "2026-04-30")
 
+    def test_normalize_schedule_response_filters_by_subgroup(self) -> None:
+        payload = {
+            "schedules": {
+                "Понедельник": [
+                    {
+                        "subject": "Общая пара",
+                        "startLessonTime": "08:00",
+                        "endLessonTime": "09:25",
+                        "weekNumber": [3],
+                        "startLessonDate": "01.01.2026",
+                        "endLessonDate": "31.12.2026",
+                    },
+                    {
+                        "subject": "Подгруппа 1",
+                        "startLessonTime": "10:00",
+                        "endLessonTime": "11:25",
+                        "weekNumber": [3],
+                        "numSubgroup": "1",
+                        "startLessonDate": "01.01.2026",
+                        "endLessonDate": "31.12.2026",
+                    },
+                    {
+                        "subject": "Подгруппа 2",
+                        "startLessonTime": "12:00",
+                        "endLessonTime": "13:25",
+                        "weekNumber": [3],
+                        "numSubgroup": "2",
+                        "startLessonDate": "01.01.2026",
+                        "endLessonDate": "31.12.2026",
+                    },
+                ]
+            }
+        }
+
+        normalized = normalize_schedule_response(
+            payload,
+            3,
+            date(2026, 3, 4),
+            subgroup="1",
+        )
+
+        monday = normalized["days"][0]
+        self.assertEqual(monday["date"], "2026-03-02")
+        self.assertEqual(
+            [lesson["subject"] for lesson in monday["lessons"]],
+            ["Общая пара", "Подгруппа 1"],
+        )
+
+
     def test_schedule_route_returns_frontend_contract(self) -> None:
         def fetcher(path: str, _params: dict[str, str]):
             if path == "/schedule":
@@ -546,6 +595,61 @@ class BackendServerTests(unittest.TestCase):
         self.assertEqual(lesson["type"], "ЛК")
         self.assertEqual(lesson["startTime"], "10:05")
         self.assertEqual(lesson["endTime"], "11:30")
+
+    def test_schedule_route_passes_subgroup_and_filters_lessons(self) -> None:
+        calls: list[tuple[str, dict[str, str]]] = []
+
+        def fetcher(path: str, params: dict[str, str]):
+            calls.append((path, dict(params)))
+            if path == "/schedule":
+                return {
+                    "schedules": {
+                        "Понедельник": [
+                            {
+                                "subject": "Общая пара",
+                                "startLessonTime": "08:00",
+                                "endLessonTime": "09:25",
+                                "weekNumber": [3],
+                                "startLessonDate": "01.01.2026",
+                                "endLessonDate": "31.12.2026",
+                            },
+                            {
+                                "subject": "Для 2-й подгруппы",
+                                "startLessonTime": "10:00",
+                                "endLessonTime": "11:25",
+                                "weekNumber": [3],
+                                "numSubgroup": "2",
+                                "startLessonDate": "01.01.2026",
+                                "endLessonDate": "31.12.2026",
+                            },
+                        ]
+                    }
+                }
+
+            if path == "/schedule/current-week":
+                return 3
+
+            raise AssertionError(f"Unexpected path: {path}")
+
+        app = BackendApp(
+            config=TEST_CONFIG,
+            fetcher=fetcher,
+            today=lambda: date(2026, 3, 4),
+        )
+
+        response = app.handle_request(
+            "GET",
+            "/api/schedule?studentGroup=353502&subgroup=1",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        monday = response.payload["days"][0]
+        self.assertEqual(
+            [lesson["subject"] for lesson in monday["lessons"]],
+            ["Общая пара"],
+        )
+        self.assertIn(("/schedule", {"studentGroup": "353502"}), calls)
+
 
     def test_normalize_employees_response_unwraps_value_payload(self) -> None:
         payload = {
