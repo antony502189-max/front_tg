@@ -297,6 +297,7 @@ export const SchedulePage = () => {
           groupNumber: normalizedGroupNumber,
           teacherUrlId: activeTeacherUrlId,
           teacherEmployeeId: activeTeacherEmployeeId,
+          subgroup,
         },
         signal,
       )
@@ -307,6 +308,7 @@ export const SchedulePage = () => {
       effectiveRole,
       normalizedGroupNumber,
       referenceDate,
+      subgroup,
       view,
     ],
   )

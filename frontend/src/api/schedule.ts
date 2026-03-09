@@ -23,6 +23,7 @@ type FetchScheduleParams = {
   groupNumber?: string
   teacherUrlId?: string
   teacherEmployeeId?: string
+  subgroup?: "all" | "1" | "2"
 }
 
 export async function fetchSchedule(
@@ -33,6 +34,7 @@ export async function fetchSchedule(
     groupNumber,
     teacherUrlId,
     teacherEmployeeId,
+    subgroup,
   }: FetchScheduleParams,
   signal?: AbortSignal,
 ): Promise<ScheduleResponse> {
@@ -43,6 +45,9 @@ export async function fetchSchedule(
 
   if (role === 'student') {
     params.studentGroup = groupNumber?.trim() ?? ''
+    if (subgroup && subgroup !== 'all') {
+      params.subgroup = subgroup
+    }
   } else {
     params.teacherUrlId = teacherUrlId?.trim() ?? ''
     if (teacherEmployeeId?.trim()) {
