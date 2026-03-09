@@ -150,6 +150,17 @@ const getLessonStatus = (
   return 'upcoming'
 }
 
+const lessonMatchesSubgroup = (
+  lesson: Lesson,
+  subgroup: 'all' | '1' | '2',
+) => {
+  if (subgroup === 'all') {
+    return true
+  }
+
+  return !lesson.subgroup || lesson.subgroup === subgroup
+}
+
 const getRelativeDayLabel = (dateKey: string, todayKey: string) => {
   if (dateKey === todayKey) {
     return 'Сегодня'
@@ -382,10 +393,12 @@ export const SchedulePage = () => {
     const now = new Date()
     const mappedDays = days.map((day) => ({
       date: day.date,
-      lessons: day.lessons.map((lesson) => ({
-        ...lesson,
-        status: getLessonStatus(lesson, now),
-      })),
+      lessons: day.lessons
+        .filter((lesson) => lessonMatchesSubgroup(lesson, subgroup))
+        .map((lesson) => ({
+          ...lesson,
+          status: getLessonStatus(lesson, now),
+        })),
     }))
 
     if (view === 'day' || view === 'semester') {
@@ -393,7 +406,7 @@ export const SchedulePage = () => {
     }
 
     return mappedDays.filter((day) => day.lessons.length > 0)
-  }, [rawDays, view])
+  }, [rawDays, subgroup, view])
 
   const rangeLabel = formatScheduleRange(
     data?.rangeStart ?? referenceDate,

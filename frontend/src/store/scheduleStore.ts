@@ -15,6 +15,7 @@ export type Lesson = {
   startTime: string
   endTime: string
   date: string
+  subgroup?: '1' | '2' | null
 }
 
 export type ScheduleDay = {
