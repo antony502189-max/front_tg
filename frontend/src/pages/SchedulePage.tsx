@@ -12,6 +12,7 @@ import {
   fetchSchedule,
   type ScheduleResponse,
   type ScheduleViewMode,
+  type ScheduleWeekNumber,
 } from '../api/schedule'
 import { getApiErrorMessage } from '../api/client'
 import {
@@ -43,6 +44,7 @@ const TEACHER_VIEW_OPTIONS: Array<{
   value: ScheduleViewMode
   label: string
 }> = [...DEFAULT_VIEW_OPTIONS, { value: 'semester', label: 'Семестр' }]
+const SCHEDULE_WEEK_OPTIONS: ScheduleWeekNumber[] = [1, 2, 3, 4]
 
 const dayFormatter = new Intl.DateTimeFormat('ru-RU', {
   weekday: 'long',
@@ -87,6 +89,8 @@ const LESSON_COUNT_LABELS: Record<number, string> = {
   4: 'пары',
 }
 
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000
+
 const shiftDateKey = (
   dateKey: string,
   view: ScheduleViewMode,
@@ -106,6 +110,51 @@ const shiftDateKey = (
   }
 
   return toDateKey(nextDate)
+}
+
+const weekStartTimestamp = (dateKey: string) => {
+  const parsed = parseDateKey(dateKey)
+  if (!parsed) {
+    return null
+  }
+
+  const normalized = new Date(parsed)
+  const weekday = (normalized.getDay() + 6) % 7
+  normalized.setDate(normalized.getDate() - weekday)
+
+  return Date.UTC(
+    normalized.getFullYear(),
+    normalized.getMonth(),
+    normalized.getDate(),
+  )
+}
+
+const shiftScheduleWeek = (
+  week: ScheduleWeekNumber,
+  offsetWeeks: number,
+): ScheduleWeekNumber =>
+  ((((week - 1 + offsetWeeks) % 4) + 4) % 4) + 1 as ScheduleWeekNumber
+
+const resolveDisplayedWeek = (
+  currentWeek: ScheduleWeekNumber,
+  todayKey: string,
+  dateKey: string,
+): ScheduleWeekNumber => {
+  const todayWeekStart = weekStartTimestamp(todayKey)
+  const targetWeekStart = weekStartTimestamp(dateKey)
+
+  if (
+    todayWeekStart === null ||
+    targetWeekStart === null
+  ) {
+    return currentWeek
+  }
+
+  const offsetWeeks = Math.round(
+    (targetWeekStart - todayWeekStart) / WEEK_MS,
+  )
+
+  return shiftScheduleWeek(currentWeek, offsetWeeks)
 }
 
 const formatScheduleDate = (dateKey: string) => {
@@ -311,6 +360,9 @@ export const SchedulePage = () => {
   const [referenceDate, setReferenceDate] = useState(() =>
     toDateKey(new Date()),
   )
+  const [selectedWeek, setSelectedWeek] = useState<ScheduleWeekNumber | null>(
+    null,
+  )
 
   const todayKey = toDateKey(new Date())
   const normalizedGroupNumber = groupNumber.trim()
@@ -388,6 +440,7 @@ export const SchedulePage = () => {
             : normalizedGroupNumber,
           activeTeacherEmployeeId,
           effectiveSubgroup,
+          selectedWeek ?? 'auto',
           view,
           referenceDate,
         ].join(':')
@@ -398,6 +451,8 @@ export const SchedulePage = () => {
       if (!effectiveRole) {
         return Promise.resolve<ScheduleResponse>({
           view,
+          currentWeek: 1,
+          selectedWeek: selectedWeek ?? 1,
           rangeStart: referenceDate,
           rangeEnd: referenceDate,
           days: [],
@@ -413,6 +468,7 @@ export const SchedulePage = () => {
           teacherUrlId: activeTeacherUrlId,
           teacherEmployeeId: activeTeacherEmployeeId,
           subgroup: effectiveSubgroup,
+          week: selectedWeek ?? undefined,
         },
         signal,
       )
@@ -424,6 +480,7 @@ export const SchedulePage = () => {
       effectiveSubgroup,
       normalizedGroupNumber,
       referenceDate,
+      selectedWeek,
       view,
     ],
   )
@@ -520,6 +577,16 @@ export const SchedulePage = () => {
     data?.rangeEnd ?? referenceDate,
     view,
   )
+  const currentScheduleWeek = data?.currentWeek ?? null
+  const activeScheduleWeek =
+    selectedWeek ??
+    (currentScheduleWeek
+      ? resolveDisplayedWeek(
+          currentScheduleWeek,
+          todayKey,
+          referenceDate,
+        )
+      : null)
   const identityLabel =
     effectiveRole === 'teacher'
       ? previewTeacher?.fullName.trim() ||
@@ -538,6 +605,9 @@ export const SchedulePage = () => {
     effectiveSubgroup === 'all'
       ? 'Все пары'
       : `${effectiveSubgroup}-я подгруппа`
+  const weekLabel = activeScheduleWeek
+    ? `${activeScheduleWeek}-я неделя`
+    : 'Неделя не выбрана'
   const refreshBadge = isRefreshing ? (
     <DataRefreshBadge
       label="Обновляем расписание"
@@ -671,6 +741,47 @@ export const SchedulePage = () => {
             </div>
           )}
 
+          <div className="schedule-week-panel">
+            <div className="schedule-subgroup-copy">
+              <span className="schedule-subgroup-label">Неделя</span>
+              <strong className="schedule-subgroup-value">
+                {weekLabel}
+              </strong>
+              <p className="schedule-subgroup-text">
+                {currentScheduleWeek
+                  ? `Текущая неделя по API БГУИР: ${currentScheduleWeek}. Выберите 1–4, чтобы посмотреть нужное расписание.`
+                  : 'Загружаем текущую неделю из API БГУИР.'}
+              </p>
+            </div>
+
+            <div
+              className="schedule-week-toggle"
+              role="tablist"
+              aria-label="Выбор учебной недели"
+            >
+              {SCHEDULE_WEEK_OPTIONS.map((weekOption) => {
+                const isActive = activeScheduleWeek === weekOption
+
+                return (
+                  <button
+                    key={weekOption}
+                    type="button"
+                    role="tab"
+                    aria-selected={isActive}
+                    className={`schedule-week-chip${
+                      isActive ? ' schedule-week-chip--active' : ''
+                    }`}
+                    onClick={() => {
+                      setSelectedWeek(weekOption)
+                    }}
+                  >
+                    {weekOption}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
           <div className="schedule-period-bar">
             <button
               type="button"
@@ -712,7 +823,10 @@ export const SchedulePage = () => {
             <button
               type="button"
               className="schedule-today-button"
-              onClick={() => setReferenceDate(todayKey)}
+              onClick={() => {
+                setReferenceDate(todayKey)
+                setSelectedWeek(null)
+              }}
             >
               Сегодня
             </button>

@@ -2029,6 +2029,7 @@ body {
 }
 
 .schedule-view-chip,
+.schedule-week-chip,
 .schedule-today-button,
 .schedule-period-button {
   border: 1px solid rgba(96, 119, 143, 0.18);
@@ -2036,7 +2037,8 @@ body {
   color: var(--tg-text-color);
 }
 
-.schedule-view-chip {
+.schedule-view-chip,
+.schedule-week-chip {
   min-width: 88px;
   padding: 10px 14px;
   border-radius: 999px;
@@ -2045,7 +2047,8 @@ body {
   cursor: pointer;
 }
 
-.schedule-view-chip--active {
+.schedule-view-chip--active,
+.schedule-week-chip--active {
   background: linear-gradient(135deg, rgba(14, 165, 233, 0.16), rgba(255, 255, 255, 0.94));
   border-color: rgba(14, 165, 233, 0.45);
 }
@@ -2751,6 +2754,7 @@ body {
 
 .planner-filter-chip,
 .schedule-view-chip,
+.schedule-week-chip,
 .schedule-today-button,
 .schedule-period-button,
 .univer-mode-tab,
@@ -2777,6 +2781,7 @@ body {
 
 .planner-filter-chip,
 .schedule-view-chip,
+.schedule-week-chip,
 .schedule-today-button,
 .schedule-period-button,
 .univer-mode-tab,
@@ -2786,6 +2791,7 @@ body {
 
 .planner-filter-chip--active,
 .schedule-view-chip--active,
+.schedule-week-chip--active,
 .univer-mode-tab--active,
 .settings-subgroup-button--active,
 .profile-role-card--active,
@@ -3610,7 +3616,8 @@ body {
 }
 
 .study-subgroup-card,
-.schedule-subgroup-panel {
+.schedule-subgroup-panel,
+.schedule-week-panel {
   border: 1px solid var(--app-card-border);
   border-radius: 20px;
   background: var(--app-card-bg);
@@ -3661,7 +3668,8 @@ body {
   color: var(--app-danger);
 }
 
-.schedule-subgroup-panel {
+.schedule-subgroup-panel,
+.schedule-week-panel {
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -3681,6 +3689,16 @@ body {
 
 .schedule-subgroup-toggle {
   align-self: flex-start;
+}
+
+.schedule-week-toggle {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.schedule-week-chip {
+  min-width: 52px;
 }
 
 .schedule-day-section {

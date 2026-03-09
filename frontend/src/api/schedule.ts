@@ -3,6 +3,7 @@ import type { Lesson } from '../store/scheduleStore'
 import type { UserRole } from '../types/user'
 
 export type ScheduleViewMode = 'day' | 'week' | 'month' | 'semester'
+export type ScheduleWeekNumber = 1 | 2 | 3 | 4
 
 export type DaySchedule = {
   date: string
@@ -11,6 +12,8 @@ export type DaySchedule = {
 
 export type ScheduleResponse = {
   view: ScheduleViewMode
+  currentWeek: ScheduleWeekNumber
+  selectedWeek: ScheduleWeekNumber
   rangeStart: string
   rangeEnd: string
   days: DaySchedule[]
@@ -24,6 +27,7 @@ type FetchScheduleParams = {
   teacherUrlId?: string
   teacherEmployeeId?: string
   subgroup?: "all" | "1" | "2"
+  week?: ScheduleWeekNumber
 }
 
 export async function fetchSchedule(
@@ -35,12 +39,17 @@ export async function fetchSchedule(
     teacherUrlId,
     teacherEmployeeId,
     subgroup,
+    week,
   }: FetchScheduleParams,
   signal?: AbortSignal,
 ): Promise<ScheduleResponse> {
   const params: Record<string, string> = {
     date,
     view,
+  }
+
+  if (week) {
+    params.week = String(week)
   }
 
   if (role === 'student') {

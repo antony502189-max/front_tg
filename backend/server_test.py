@@ -254,6 +254,7 @@ class BackendServerTests(unittest.TestCase):
                 "teacherUrlId": "",
                 "teacherEmployeeId": "",
                 "subgroup": "all",
+                "week": "",
                 "view": "week",
                 "date": "2026-03-04",
             },
@@ -264,6 +265,8 @@ class BackendServerTests(unittest.TestCase):
             key,
             {
                 "view": "week",
+                "currentWeek": 3,
+                "selectedWeek": 3,
                 "rangeStart": "2026-03-02",
                 "rangeEnd": "2026-03-08",
                 "days": [{"date": "2026-01-01", "lessons": []}],
@@ -293,6 +296,8 @@ class BackendServerTests(unittest.TestCase):
             response.payload,
             {
                 "view": "week",
+                "currentWeek": 3,
+                "selectedWeek": 3,
                 "rangeStart": "2026-03-02",
                 "rangeEnd": "2026-03-08",
                 "days": [{"date": "2026-01-01", "lessons": []}],
@@ -466,6 +471,8 @@ class BackendServerTests(unittest.TestCase):
 
         normalized = normalize_schedule_response(payload, 3, date(2026, 3, 4))
 
+        self.assertEqual(normalized["currentWeek"], 3)
+        self.assertEqual(normalized["selectedWeek"], 3)
         self.assertEqual(len(normalized["days"]), 7)
         monday = normalized["days"][0]
         self.assertEqual(monday["date"], "2026-03-02")
@@ -500,10 +507,54 @@ class BackendServerTests(unittest.TestCase):
         )
 
         self.assertEqual(normalized["view"], "semester")
+        self.assertEqual(normalized["currentWeek"], 3)
+        self.assertEqual(normalized["selectedWeek"], 4)
         self.assertEqual(normalized["rangeStart"], "2026-03-09")
         self.assertEqual(normalized["rangeEnd"], "2026-04-30")
         self.assertEqual(normalized["days"][0]["date"], "2026-03-09")
         self.assertEqual(normalized["days"][-1]["date"], "2026-04-30")
+
+    def test_normalize_schedule_response_respects_selected_week_override(
+        self,
+    ) -> None:
+        payload = {
+            "schedules": {
+                "Понедельник": [
+                    {
+                        "subject": "Неделя 4",
+                        "startLessonTime": "10:05",
+                        "endLessonTime": "11:30",
+                        "weekNumber": [4],
+                        "startLessonDate": "01.01.2026",
+                        "endLessonDate": "31.12.2026",
+                    },
+                    {
+                        "subject": "Неделя 1",
+                        "startLessonTime": "12:00",
+                        "endLessonTime": "13:25",
+                        "weekNumber": [1],
+                        "startLessonDate": "01.01.2026",
+                        "endLessonDate": "31.12.2026",
+                    },
+                ]
+            }
+        }
+
+        normalized = normalize_schedule_response(
+            payload,
+            4,
+            date(2026, 3, 9),
+            reference_date=date(2026, 3, 9),
+            selected_week=1,
+        )
+
+        self.assertEqual(normalized["currentWeek"], 4)
+        self.assertEqual(normalized["selectedWeek"], 1)
+        monday = normalized["days"][0]
+        self.assertEqual(
+            [lesson["subject"] for lesson in monday["lessons"]],
+            ["Неделя 1"],
+        )
 
     def test_normalize_schedule_response_filters_by_subgroup(self) -> None:
         payload = {
@@ -696,6 +747,8 @@ class BackendServerTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.payload["days"]), 7)
+        self.assertEqual(response.payload["currentWeek"], 3)
+        self.assertEqual(response.payload["selectedWeek"], 3)
         monday = response.payload["days"][0]
         lesson = monday["lessons"][0]
         self.assertEqual(monday["date"], "2026-03-02")
@@ -759,6 +812,57 @@ class BackendServerTests(unittest.TestCase):
             ["Общая пара"],
         )
         self.assertIn(("/schedule", {"studentGroup": "353502"}), calls)
+
+    def test_schedule_route_applies_selected_week_override(self) -> None:
+        def fetcher(path: str, _params: dict[str, str]):
+            if path == "/schedule":
+                return {
+                    "schedules": {
+                        "Понедельник": [
+                            {
+                                "subject": "Неделя 4",
+                                "startLessonTime": "10:05",
+                                "endLessonTime": "11:30",
+                                "weekNumber": [4],
+                                "startLessonDate": "01.01.2026",
+                                "endLessonDate": "31.12.2026",
+                            },
+                            {
+                                "subject": "Неделя 1",
+                                "startLessonTime": "12:00",
+                                "endLessonTime": "13:25",
+                                "weekNumber": [1],
+                                "startLessonDate": "01.01.2026",
+                                "endLessonDate": "31.12.2026",
+                            },
+                        ]
+                    }
+                }
+
+            if path == "/schedule/current-week":
+                return 4
+
+            raise AssertionError(f"Unexpected path: {path}")
+
+        app = BackendApp(
+            config=TEST_CONFIG,
+            fetcher=fetcher,
+            today=lambda: date(2026, 3, 9),
+        )
+
+        response = app.handle_request(
+            "GET",
+            "/api/schedule?studentGroup=353502&date=2026-03-09&week=1",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.payload["currentWeek"], 4)
+        self.assertEqual(response.payload["selectedWeek"], 1)
+        monday = response.payload["days"][0]
+        self.assertEqual(
+            [lesson["subject"] for lesson in monday["lessons"]],
+            ["Неделя 1"],
+        )
 
 
     def test_normalize_employees_response_unwraps_value_payload(self) -> None:

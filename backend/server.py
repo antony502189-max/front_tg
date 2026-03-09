@@ -539,20 +539,33 @@ def parse_dot_date(raw_value: Any) -> date | None:
     return None
 
 
-def normalize_current_week(payload: Any) -> int:
-    if isinstance(payload, int):
-        return payload
+def normalize_schedule_week(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
 
-    if isinstance(payload, float) and math.isfinite(payload):
-        return int(payload)
+    week_number: int | None = None
 
-    if isinstance(payload, str):
+    if isinstance(value, int):
+        week_number = value
+    elif isinstance(value, float) and math.isfinite(value):
+        week_number = int(value)
+    elif isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return None
         try:
-            return int(payload)
+            week_number = int(normalized)
         except ValueError:
-            pass
+            return None
 
-    return 1
+    if week_number is None or week_number not in {1, 2, 3, 4}:
+        return None
+
+    return week_number
+
+
+def normalize_current_week(payload: Any) -> int:
+    return normalize_schedule_week(payload) or 1
 
 
 def normalize_schedule_view(value: Any) -> str:
@@ -615,6 +628,23 @@ def schedule_week_for_date(
     lesson_monday = week_start(lesson_date)
     offset_weeks = (lesson_monday - base_monday).days // 7
     return ((current_week - 1 + offset_weeks) % 4) + 1
+
+
+def resolve_reference_schedule_week(
+    current_week: int,
+    today_value: date,
+    reference_date: date,
+    selected_week: int | None = None,
+) -> int:
+    normalized_selected_week = normalize_schedule_week(selected_week)
+    if normalized_selected_week is not None:
+        return normalized_selected_week
+
+    return schedule_week_for_date(
+        normalize_current_week(current_week),
+        today_value,
+        reference_date,
+    )
 
 
 def resolve_schedule_range(
@@ -1024,11 +1054,19 @@ def normalize_schedule_response(
     reference_date: date | None = None,
     view: str = "week",
     subgroup: str = "all",
+    selected_week: int | None = None,
 ) -> dict[str, Any]:
     schedules = payload.get("schedules") if isinstance(payload, dict) else None
     student_group = extract_schedule_group_name(payload)
     normalized_view = normalize_schedule_view(view)
     target_date = reference_date or today_value
+    normalized_current_week = normalize_current_week(current_week)
+    reference_week = resolve_reference_schedule_week(
+        normalized_current_week,
+        today_value,
+        target_date,
+        selected_week,
+    )
     range_start, range_end = resolve_schedule_range(
         target_date,
         normalized_view,
@@ -1038,6 +1076,8 @@ def normalize_schedule_response(
     if not isinstance(schedules, dict):
         return {
             "view": normalized_view,
+            "currentWeek": normalized_current_week,
+            "selectedWeek": reference_week,
             "rangeStart": range_start.isoformat(),
             "rangeEnd": range_end.isoformat(),
             "days": [],
@@ -1050,8 +1090,8 @@ def normalize_schedule_response(
         raw_lessons = schedules.get(day_name) if day_name is not None else None
         lessons = []
         lesson_week = schedule_week_for_date(
-            current_week,
-            today_value,
+            reference_week,
+            target_date,
             lesson_date,
         )
 
@@ -1091,6 +1131,8 @@ def normalize_schedule_response(
 
     return {
         "view": normalized_view,
+        "currentWeek": normalized_current_week,
+        "selectedWeek": reference_week,
         "rangeStart": range_start.isoformat(),
         "rangeEnd": range_end.isoformat(),
         "days": days,
@@ -2125,6 +2167,7 @@ class BackendApp:
         reference_date: date | None = None,
         view: str = "week",
         subgroup: str = "all",
+        selected_week: int | None = None,
     ) -> JsonValue:
         today_value = self.today()
         normalized_view = normalize_schedule_view(view)
@@ -2152,6 +2195,7 @@ class BackendApp:
             reference_date=reference_date or today_value,
             view=normalized_view,
             subgroup=normalize_subgroup(subgroup),
+            selected_week=normalize_schedule_week(selected_week),
         )
 
     def _build_free_auditories_payload(
@@ -2458,6 +2502,9 @@ class BackendApp:
             "employeeId",
         )
         subgroup = normalize_subgroup(first_query_value(parsed_url, "subgroup"))
+        selected_week = normalize_schedule_week(
+            first_query_value(parsed_url, "week")
+        )
 
         if student_group is None and teacher_url_id is None:
             return Response(
@@ -2474,6 +2521,7 @@ class BackendApp:
             "teacherUrlId": teacher_url_id or "",
             "teacherEmployeeId": teacher_employee_id or "",
             "subgroup": subgroup,
+            "week": str(selected_week or ""),
             "view": view,
             "date": reference_date.isoformat(),
         }
@@ -2488,6 +2536,7 @@ class BackendApp:
                 reference_date=reference_date,
                 view=view,
                 subgroup=subgroup,
+                selected_week=selected_week,
             ),
         )
 
