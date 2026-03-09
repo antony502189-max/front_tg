@@ -1,7 +1,7 @@
 ﻿from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
@@ -45,6 +45,8 @@ class UserProfile:
     subgroup: Subgroup = "all"
     group_number: str | None = None
     student_card_number: str | None = None
+    iis_login: str | None = None
+    iis_password: str | None = None
     employee_id: str | None = None
     url_id: str | None = None
     full_name: str | None = None
@@ -88,6 +90,8 @@ class UserProfile:
                 subgroup=subgroup,
                 group_number=group_number,
                 student_card_number=student_card_number,
+                iis_login=_as_string(payload.get("iisLogin")),
+                iis_password=_as_string(payload.get("iisPassword")),
                 updated_at=updated_at,
             )
 
@@ -124,7 +128,7 @@ class UserProfile:
     def from_mapping(cls, payload: Mapping[str, Any]) -> "UserProfile":
         return cls.from_payload(payload)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, *, include_sensitive: bool = False) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "telegramUserId": self.telegram_user_id,
             "role": self.role,
@@ -136,6 +140,13 @@ class UserProfile:
             payload["groupNumber"] = self.group_number
         if self.student_card_number is not None:
             payload["studentCardNumber"] = self.student_card_number
+        if self.iis_login is not None:
+            payload["iisLogin"] = self.iis_login
+        if include_sensitive:
+            if self.iis_password is not None:
+                payload["iisPassword"] = self.iis_password
+        elif self.iis_password is not None:
+            payload["hasIisPassword"] = True
         if self.employee_id is not None:
             payload["employeeId"] = self.employee_id
         if self.url_id is not None:
@@ -213,10 +224,32 @@ class UserProfileStore:
     def upsert(self, profile: UserProfile) -> UserProfile:
         with self.lock:
             payload = self._load_unlocked()
-            payload[profile.telegram_user_id] = profile.to_dict()
+            existing_profile = None
+            existing_payload = payload.get(profile.telegram_user_id)
+            if isinstance(existing_payload, dict):
+                try:
+                    existing_profile = UserProfile.from_mapping(existing_payload)
+                except ProfileValidationError:
+                    existing_profile = None
+
+            stored_profile = profile
+            if (
+                existing_profile is not None
+                and existing_profile.role == "student"
+                and profile.role == "student"
+            ):
+                stored_profile = replace(
+                    profile,
+                    iis_login=profile.iis_login or existing_profile.iis_login,
+                    iis_password=profile.iis_password or existing_profile.iis_password,
+                )
+
+            payload[profile.telegram_user_id] = stored_profile.to_dict(
+                include_sensitive=True
+            )
             self._save_unlocked(payload)
 
-        return profile
+        return stored_profile
 
     def delete(self, telegram_user_id: str) -> bool:
         normalized_id = _as_string(telegram_user_id)

@@ -30,6 +30,8 @@ type ProfileEditorProps = {
 type TouchedState = {
   group: boolean
   card: boolean
+  iisLogin: boolean
+  iisPassword: boolean
   teacher: boolean
 }
 
@@ -38,6 +40,8 @@ const EMPTY_EMPLOYEES: Employee[] = []
 const defaultTouched: TouchedState = {
   group: false,
   card: false,
+  iisLogin: false,
+  iisPassword: false,
   teacher: false,
 }
 
@@ -78,6 +82,10 @@ export const ProfileEditor = ({
   const initialStudentCardNumber = useUserStore(
     (state) => state.studentCardNumber,
   )
+  const initialIisLogin = useUserStore((state) => state.iisLogin)
+  const initialHasIisPassword = useUserStore(
+    (state) => state.hasIisPassword,
+  )
   const initialEmployeeId = useUserStore(
     (state) => state.employeeId,
   )
@@ -96,6 +104,8 @@ export const ProfileEditor = ({
   const [studentCardNumber, setStudentCardNumber] = useState(
     initialStudentCardNumber,
   )
+  const [iisLogin, setIisLogin] = useState(initialIisLogin)
+  const [iisPassword, setIisPassword] = useState('')
   const [teacherQuery, setTeacherQuery] = useState(initialFullName)
   const [selectedTeacher, setSelectedTeacher] = useState<Employee | null>(
     initialEmployeeId && initialUrlId && initialFullName
@@ -118,6 +128,8 @@ export const ProfileEditor = ({
     setRole(roleFromStore ?? 'student')
     setGroupNumber(initialGroupNumber)
     setStudentCardNumber(initialStudentCardNumber)
+    setIisLogin(initialIisLogin)
+    setIisPassword('')
     setTeacherQuery(initialFullName)
     setSelectedTeacher(
       initialEmployeeId && initialUrlId && initialFullName
@@ -140,6 +152,8 @@ export const ProfileEditor = ({
     initialEmployeeId,
     initialFullName,
     initialGroupNumber,
+    initialHasIisPassword,
+    initialIisLogin,
     initialPosition,
     initialStudentCardNumber,
     initialUrlId,
@@ -181,7 +195,25 @@ export const ProfileEditor = ({
   const isGroupValid = groupNumber.length === GROUP_LENGTH
   const isCardValid =
     studentCardNumber.trim().length >= STUDENT_CARD_MIN_LENGTH
-  const isStudentFormValid = isGroupValid && isCardValid
+  const normalizedIisLogin = iisLogin.trim()
+  const normalizedInitialIisLogin = initialIisLogin.trim()
+  const hasIisPasswordInput = iisPassword.trim().length > 0
+  const hasExistingIisCredentials =
+    normalizedInitialIisLogin.length > 0 || initialHasIisPassword
+  const isIisLoginChanged =
+    normalizedIisLogin !== normalizedInitialIisLogin
+  const needsIisPassword =
+    normalizedIisLogin.length > 0 &&
+    (isIisLoginChanged || !initialHasIisPassword)
+  const isIisLoginValid =
+    normalizedIisLogin.length > 0 ||
+    (!hasExistingIisCredentials && !hasIisPasswordInput)
+  const isIisPasswordValid = !needsIisPassword || hasIisPasswordInput
+  const isStudentFormValid =
+    isGroupValid &&
+    isCardValid &&
+    isIisLoginValid &&
+    isIisPasswordValid
   const isTeacherFormValid = selectedTeacher !== null
   const isFormValid =
     role === 'student' ? isStudentFormValid : isTeacherFormValid
@@ -221,6 +253,8 @@ export const ProfileEditor = ({
     setTouched({
       group: true,
       card: true,
+      iisLogin: true,
+      iisPassword: true,
       teacher: true,
     })
 
@@ -241,6 +275,8 @@ export const ProfileEditor = ({
               subgroup,
               groupNumber: groupNumber.trim(),
               studentCardNumber: studentCardNumber.trim(),
+              iisLogin: normalizedIisLogin || undefined,
+              iisPassword: iisPassword.trim() || undefined,
             }
           : {
               telegramUserId: sessionUserId,
@@ -385,6 +421,82 @@ export const ProfileEditor = ({
               ) : (
                 <p className="onboarding-hint">
                   Нужен для вкладки с оценками и данными по учёбе.
+                </p>
+              )}
+            </div>
+
+            <div className="onboarding-field">
+              <label htmlFor="profile-iis-login" className="onboarding-label">
+                Логин IIS
+              </label>
+              <input
+                id="profile-iis-login"
+                autoComplete="username"
+                className={`onboarding-input${
+                  touched.iisLogin && !isIisLoginValid
+                    ? ' onboarding-input--error'
+                    : ''
+                }`}
+                placeholder="Например, 56841017"
+                value={iisLogin}
+                onChange={(event) => setIisLogin(event.target.value.trim())}
+                onBlur={() =>
+                  setTouched((current) => ({
+                    ...current,
+                    iisLogin: true,
+                  }))
+                }
+              />
+              {touched.iisLogin && !isIisLoginValid ? (
+                <p className="onboarding-error">
+                  Укажите логин IIS. Без него нельзя загрузить пропуски.
+                </p>
+              ) : (
+                <p className="onboarding-hint">
+                  Нужен только для раздела с пропусками во вкладке «Учёба».
+                </p>
+              )}
+            </div>
+
+            <div className="onboarding-field">
+              <label
+                htmlFor="profile-iis-password"
+                className="onboarding-label"
+              >
+                Пароль IIS
+              </label>
+              <input
+                id="profile-iis-password"
+                type="password"
+                autoComplete="current-password"
+                className={`onboarding-input${
+                  touched.iisPassword && !isIisPasswordValid
+                    ? ' onboarding-input--error'
+                    : ''
+                }`}
+                placeholder={
+                  initialHasIisPassword
+                    ? 'Оставьте пустым, чтобы не менять'
+                    : 'Введите пароль IIS'
+                }
+                value={iisPassword}
+                onChange={(event) => setIisPassword(event.target.value)}
+                onBlur={() =>
+                  setTouched((current) => ({
+                    ...current,
+                    iisPassword: true,
+                  }))
+                }
+              />
+              {touched.iisPassword && !isIisPasswordValid ? (
+                <p className="onboarding-error">
+                  Введите пароль IIS для текущего логина.
+                </p>
+              ) : (
+                <p className="onboarding-hint">
+                  {initialHasIisPassword && !isIisLoginChanged
+                    ? 'Пароль уже сохранён на backend. Заполните поле только если хотите заменить его.'
+                    : 'Пароль хранится только на backend и нужен для загрузки пропусков.'}
                 </p>
               )}
             </div>

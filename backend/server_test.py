@@ -17,6 +17,7 @@ from backend.server import (
     normalize_employees_response,
     extract_grade_subjects,
     normalize_grades_response,
+    normalize_omissions_response,
     normalize_schedule_response,
     read_fresh_cache,
     read_stale_cache,
@@ -162,6 +163,7 @@ class BackendServerTests(unittest.TestCase):
     def test_route_config_resolves_known_routes(self) -> None:
         self.assertEqual(route_config("/api/schedule").cache_namespace, "/schedule")
         self.assertEqual(route_config("/api/grades").query_param, "studentCardNumber")
+        self.assertEqual(route_config("/api/omissions").query_param, "telegramUserId")
         self.assertEqual(route_config("/api/employees").min_length, 2)
         self.assertEqual(route_config("/api/auditories").query_param, "q")
         self.assertIsNone(route_config("/unknown"))
@@ -2097,6 +2099,172 @@ class BackendServerTests(unittest.TestCase):
             self.assertEqual(deleted.status_code, 200)
             self.assertEqual(deleted.payload, {"ok": True})
             self.assertEqual(missing.status_code, 404)
+        finally:
+            store_path.unlink(missing_ok=True)
+
+    def test_profile_route_preserves_iis_credentials_and_hides_password(self) -> None:
+        store_path = Path("backend") / "_profile_store_iis_test.json"
+        store_path.unlink(missing_ok=True)
+        try:
+            app = BackendApp(
+                config=TEST_CONFIG,
+                fetcher=lambda *_: {},
+                profile_store=UserProfileStore(store_path),
+            )
+            created = app.handle_request(
+                "PUT",
+                "/api/profile",
+                body=json.dumps(
+                    {
+                        "telegramUserId": "tg:77",
+                        "role": "student",
+                        "groupNumber": "568403",
+                        "studentCardNumber": "56841017",
+                        "subgroup": "2",
+                        "iisLogin": "56841017",
+                        "iisPassword": "secret",
+                    }
+                ).encode("utf-8"),
+            )
+            updated = app.handle_request(
+                "PUT",
+                "/api/profile",
+                body=json.dumps(
+                    {
+                        "telegramUserId": "tg:77",
+                        "role": "student",
+                        "groupNumber": "568403",
+                        "studentCardNumber": "56841017",
+                        "subgroup": "1",
+                    }
+                ).encode("utf-8"),
+            )
+            fetched = app.handle_request(
+                "GET",
+                "/api/profile?telegramUserId=tg:77",
+            )
+            stored = app.profile_store.get("tg:77")
+
+            self.assertEqual(created.status_code, 200)
+            self.assertEqual(created.payload["iisLogin"], "56841017")
+            self.assertTrue(created.payload["hasIisPassword"])
+            self.assertNotIn("iisPassword", created.payload)
+            self.assertEqual(updated.status_code, 200)
+            self.assertEqual(updated.payload["iisLogin"], "56841017")
+            self.assertTrue(updated.payload["hasIisPassword"])
+            self.assertNotIn("iisPassword", updated.payload)
+            self.assertEqual(fetched.status_code, 200)
+            self.assertEqual(fetched.payload["iisLogin"], "56841017")
+            self.assertTrue(fetched.payload["hasIisPassword"])
+            self.assertNotIn("iisPassword", fetched.payload)
+            self.assertIsNotNone(stored)
+            self.assertEqual(stored.iis_login, "56841017")
+            self.assertEqual(stored.iis_password, "secret")
+        finally:
+            store_path.unlink(missing_ok=True)
+
+    def test_normalize_omissions_response_sums_month_counts(self) -> None:
+        normalized = normalize_omissions_response(
+            [
+                {"month": "Февраль", "omissionCount": 2},
+                {"month": "Март", "omissionCount": "0"},
+                {"month": "Апрель", "omissionCount": None},
+            ]
+        )
+
+        self.assertEqual(normalized["totalHours"], 2)
+        self.assertEqual(len(normalized["months"]), 3)
+        self.assertEqual(normalized["months"][0]["month"], "Февраль")
+
+    def test_omissions_route_returns_month_counts_for_student_profile(self) -> None:
+        store_path = Path("backend") / "_profile_store_omissions_test.json"
+        store_path.unlink(missing_ok=True)
+
+        class FakeOmissionsService:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, str]] = []
+
+            def fetch_month_student_omission_counts(
+                self,
+                username: str,
+                password: str,
+            ):
+                self.calls.append((username, password))
+                return [
+                    {"month": "Февраль", "omissionCount": 2},
+                    {"month": "Март", "omissionCount": 0},
+                ]
+
+        try:
+            service = FakeOmissionsService()
+            app = BackendApp(
+                config=TEST_CONFIG,
+                fetcher=lambda *_: {},
+                profile_store=UserProfileStore(store_path),
+                omissions_service=service,
+            )
+            app.handle_request(
+                "PUT",
+                "/api/profile",
+                body=json.dumps(
+                    {
+                        "telegramUserId": "tg:91",
+                        "role": "student",
+                        "groupNumber": "568403",
+                        "studentCardNumber": "56841017",
+                        "iisLogin": "56841017",
+                        "iisPassword": "secret",
+                    }
+                ).encode("utf-8"),
+            )
+
+            response = app.handle_request(
+                "GET",
+                "/api/omissions?telegramUserId=tg:91",
+            )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.payload["totalHours"], 2)
+            self.assertEqual(
+                response.payload["months"],
+                [
+                    {"month": "Февраль", "omissionCount": 2},
+                    {"month": "Март", "omissionCount": 0},
+                ],
+            )
+            self.assertEqual(service.calls, [("56841017", "secret")])
+        finally:
+            store_path.unlink(missing_ok=True)
+
+    def test_omissions_route_requires_iis_credentials(self) -> None:
+        store_path = Path("backend") / "_profile_store_omissions_missing_test.json"
+        store_path.unlink(missing_ok=True)
+        try:
+            app = BackendApp(
+                config=TEST_CONFIG,
+                fetcher=lambda *_: {},
+                profile_store=UserProfileStore(store_path),
+            )
+            app.handle_request(
+                "PUT",
+                "/api/profile",
+                body=json.dumps(
+                    {
+                        "telegramUserId": "tg:92",
+                        "role": "student",
+                        "groupNumber": "568403",
+                        "studentCardNumber": "56841017",
+                    }
+                ).encode("utf-8"),
+            )
+
+            response = app.handle_request(
+                "GET",
+                "/api/omissions?telegramUserId=tg:92",
+            )
+
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("логин и пароль IIS", response.payload["error"])
         finally:
             store_path.unlink(missing_ok=True)
 

@@ -7,6 +7,9 @@ export type UserProfile = {
   subgroup?: Subgroup
   groupNumber?: string
   studentCardNumber?: string
+  iisLogin?: string
+  iisPassword?: string
+  hasIisPassword?: boolean
   employeeId?: string
   urlId?: string
   fullName?: string

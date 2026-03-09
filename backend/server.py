@@ -17,6 +17,7 @@ from urllib.request import Request, urlopen
 
 try:
     from backend.env import load_project_env, parse_number_env, parse_string_env
+    from backend.services.omissions import OmissionsService
     from backend.services.rating import (
         RatingService,
         StudentRatingFetchResult,
@@ -38,6 +39,7 @@ try:
     )
 except ModuleNotFoundError:  # pragma: no cover - fallback for direct script launch
     from env import load_project_env, parse_number_env, parse_string_env  # type: ignore
+    from services.omissions import OmissionsService  # type: ignore
     from services.rating import (  # type: ignore
         RatingService,
         StudentRatingFetchResult,
@@ -192,6 +194,12 @@ ROUTE_CONFIGS = {
         kind="grades",
         cache_namespace="/grades",
         query_param="studentCardNumber",
+        min_length=1,
+    ),
+    "/api/omissions": RouteConfig(
+        kind="omissions",
+        cache_namespace="/omissions",
+        query_param="telegramUserId",
         min_length=1,
     ),
     "/api/employees": RouteConfig(
@@ -1983,6 +1991,69 @@ def normalize_grades_response(
 
 
 
+def _coerce_non_negative_int(value: Any) -> int:
+    if isinstance(value, bool):
+        return 0
+
+    if isinstance(value, int):
+        return max(value, 0)
+
+    if isinstance(value, float) and math.isfinite(value):
+        return max(int(value), 0)
+
+    if isinstance(value, str):
+        normalized = value.replace(",", ".").strip()
+        if not normalized:
+            return 0
+
+        try:
+            return max(int(float(normalized)), 0)
+        except ValueError:
+            return 0
+
+    return 0
+
+
+def normalize_month_student_omission_counts(
+    payload: Any,
+) -> list[dict[str, Any]]:
+    items = unwrap_value_list(payload) or payload
+    if not isinstance(items, list):
+        return []
+
+    result: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+
+        month = item.get("month")
+        if not isinstance(month, str):
+            continue
+
+        normalized_month = month.strip()
+        if not normalized_month:
+            continue
+
+        result.append(
+            {
+                "month": normalized_month,
+                "omissionCount": _coerce_non_negative_int(
+                    item.get("omissionCount")
+                ),
+            }
+        )
+
+    return result
+
+
+def normalize_omissions_response(payload: Any) -> dict[str, Any]:
+    months = normalize_month_student_omission_counts(payload)
+    return {
+        "totalHours": sum(item["omissionCount"] for item in months),
+        "months": months,
+    }
+
+
 def parse_json_request_body(body: bytes | None) -> dict[str, Any]:
     if not body:
         raise ProfileValidationError("Request body is required")
@@ -2021,6 +2092,7 @@ class BackendApp:
         today: TodayFn | None = None,
         telegram_bot_app: TelegramBotApp | None = None,
         profile_store: UserProfileStore | None = None,
+        omissions_service: OmissionsService | None = None,
     ) -> None:
         self.config = self._resolve_config(config)
         self.store = {} if store is None else store
@@ -2031,6 +2103,13 @@ class BackendApp:
         self.started_at_ms = self.now_ms()
         self.lock = Lock()
         self.profile_store = profile_store or UserProfileStore()
+        self.omissions_service = omissions_service or OmissionsService(
+            iis_base_url=self.config.iis_base_url,
+            request_timeout_ms=self.config.request_timeout_ms,
+            max_retries=self.config.max_retries,
+            retry_delay_ms=self.config.retry_delay_ms,
+            upstream_error_cls=UpstreamRequestError,
+        )
         self._inflight_requests: dict[str, Future[JsonValue]] = {}
         self._timeout_fetchers: dict[int, Fetcher] = {}
         self.rating_service = RatingService(
@@ -2050,6 +2129,7 @@ class BackendApp:
             "employees": self._build_employees_payload,
             "auditories": self._build_auditories_payload,
             "grades": self._build_grades_payload,
+            "omissions": self._build_omissions_payload,
         }
         self.telegram_bot_app = (
             telegram_bot_app
@@ -2425,6 +2505,30 @@ class BackendApp:
             rating_payload,
             extra_summary=extra_summary,
             warning=warning,
+        )
+
+    def _build_omissions_payload(self, telegram_user_id: str) -> JsonValue:
+        profile = self.profile_store.get(telegram_user_id)
+        if profile is None:
+            raise UpstreamRequestError("Profile not found", status=404)
+
+        if profile.role != "student":
+            raise UpstreamRequestError(
+                "Пропуски доступны только для студента.",
+                status=400,
+            )
+
+        if not profile.iis_login or not profile.iis_password:
+            raise UpstreamRequestError(
+                "Добавьте логин и пароль IIS в профиле, чтобы загружать пропуски.",
+                status=400,
+            )
+
+        return normalize_omissions_response(
+            self.omissions_service.fetch_month_student_omission_counts(
+                profile.iis_login,
+                profile.iis_password,
+            )
         )
 
     def build_route_payload(self, route: RouteConfig, query_value: str) -> JsonValue:

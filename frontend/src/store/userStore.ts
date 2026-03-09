@@ -9,6 +9,8 @@ type UserData = {
   role: UserRole | null
   groupNumber: string
   studentCardNumber: string
+  iisLogin: string
+  hasIisPassword: boolean
   employeeId: string
   urlId: string
   fullName: string
@@ -33,6 +35,8 @@ const defaultState: UserData = {
   role: null,
   groupNumber: '',
   studentCardNumber: '',
+  iisLogin: '',
+  hasIisPassword: false,
   employeeId: '',
   urlId: '',
   fullName: '',
@@ -69,6 +73,14 @@ const sanitizePersistedUser = (
       typeof persisted?.studentCardNumber === 'string'
         ? persisted.studentCardNumber
         : defaultState.studentCardNumber,
+    iisLogin:
+      typeof persisted?.iisLogin === 'string'
+        ? persisted.iisLogin
+        : defaultState.iisLogin,
+    hasIisPassword:
+      typeof persisted?.hasIisPassword === 'boolean'
+        ? persisted.hasIisPassword
+        : defaultState.hasIisPassword,
     employeeId:
       typeof persisted?.employeeId === 'string'
         ? persisted.employeeId
@@ -105,6 +117,8 @@ const mapProfileToState = (profile: UserProfile): UserData => ({
   role: profile.role,
   groupNumber: profile.groupNumber?.trim() ?? '',
   studentCardNumber: profile.studentCardNumber?.trim() ?? '',
+  iisLogin: profile.iisLogin?.trim() ?? '',
+  hasIisPassword: profile.hasIisPassword === true,
   employeeId: profile.employeeId?.trim() ?? '',
   urlId: profile.urlId?.trim() ?? '',
   fullName: profile.fullName?.trim() ?? '',
@@ -146,6 +160,8 @@ export const useUserStore = create<UserState>()(
         role: state.role,
         groupNumber: state.groupNumber,
         studentCardNumber: state.studentCardNumber,
+        iisLogin: state.iisLogin,
+        hasIisPassword: state.hasIisPassword,
         employeeId: state.employeeId,
         urlId: state.urlId,
         fullName: state.fullName,

@@ -11,6 +11,7 @@ const buildProfilePayload = ({
   subgroup,
   groupNumber,
   studentCardNumber,
+  iisLogin,
   employeeId,
   urlId,
   fullName,
@@ -22,6 +23,7 @@ const buildProfilePayload = ({
   subgroup: Subgroup
   groupNumber: string
   studentCardNumber: string
+  iisLogin: string
   employeeId: string
   urlId: string
   fullName: string
@@ -42,6 +44,7 @@ const buildProfilePayload = ({
       subgroup,
       groupNumber: groupNumber.trim(),
       studentCardNumber: studentCardNumber.trim(),
+      iisLogin: iisLogin.trim() || undefined,
     }
   }
 
@@ -64,6 +67,7 @@ export const useSubgroupPreference = () => {
     subgroup,
     groupNumber,
     studentCardNumber,
+    iisLogin,
     employeeId,
     urlId,
     fullName,
@@ -78,6 +82,7 @@ export const useSubgroupPreference = () => {
       subgroup: state.subgroup,
       groupNumber: state.groupNumber,
       studentCardNumber: state.studentCardNumber,
+      iisLogin: state.iisLogin,
       employeeId: state.employeeId,
       urlId: state.urlId,
       fullName: state.fullName,
@@ -103,6 +108,7 @@ export const useSubgroupPreference = () => {
         subgroup: nextSubgroup,
         groupNumber,
         studentCardNumber,
+        iisLogin,
         employeeId,
         urlId,
         fullName,
@@ -141,6 +147,7 @@ export const useSubgroupPreference = () => {
       employeeId,
       fullName,
       groupNumber,
+      iisLogin,
       isSaving,
       position,
       role,

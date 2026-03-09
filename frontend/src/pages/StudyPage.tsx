@@ -2,6 +2,10 @@ import { useCallback, useMemo } from 'react'
 import { Star, Trophy } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { fetchGrades, type GradesResponse } from '../api/grades'
+import {
+  fetchOmissions,
+  type OmissionsResponse,
+} from '../api/omissions'
 import { getApiErrorMessage } from '../api/client'
 import {
   DataRefreshBadge,
@@ -9,12 +13,11 @@ import {
 } from '../components/loading/PageLoadingStates'
 import { useAsyncResource } from '../hooks/useAsyncResource'
 import { useUserStore } from '../store/userStore'
-import {
-  buildStudyOverview,
-  formatMarksLabel,
-} from '../utils/study'
+import { resolveSessionUserId } from '../telegram/session'
+import { buildStudyOverview, formatMarksLabel } from '../utils/study'
 
 const EMPTY_SUBJECTS: GradesResponse['subjects'] = []
+const EMPTY_OMISSION_MONTHS: OmissionsResponse['months'] = []
 
 const getMarkTone = (value: number) => {
   if (value >= 8) {
@@ -47,18 +50,30 @@ const StudyMetricValue = ({
   )
 
 export const StudyPage = () => {
-  const { role, groupNumber, studentCardNumber } = useUserStore(
+  const {
+    role,
+    groupNumber,
+    studentCardNumber,
+    iisLogin,
+    hasIisPassword,
+  } = useUserStore(
     useShallow((state) => ({
       role: state.role,
       groupNumber: state.groupNumber,
       studentCardNumber: state.studentCardNumber,
+      iisLogin: state.iisLogin,
+      hasIisPassword: state.hasIisPassword,
     })),
   )
 
+  const sessionUserId = resolveSessionUserId()
   const normalizedStudentCardNumber = studentCardNumber.trim()
   const normalizedGroupNumber = groupNumber.trim()
+  const normalizedIisLogin = iisLogin.trim()
   const hasStudentCardNumber = normalizedStudentCardNumber.length > 0
   const canLoadGrades = role === 'student' && hasStudentCardNumber
+  const canLoadOmissions =
+    role === 'student' && sessionUserId.trim().length > 0
 
   const loadGrades = useCallback(
     (signal: AbortSignal) =>
@@ -67,6 +82,13 @@ export const StudyPage = () => {
         signal,
       }),
     [normalizedGroupNumber, normalizedStudentCardNumber],
+  )
+  const loadOmissions = useCallback(
+    (signal: AbortSignal) =>
+      fetchOmissions(sessionUserId, {
+        signal,
+      }),
+    [sessionUserId],
   )
 
   const {
@@ -91,6 +113,28 @@ export const StudyPage = () => {
         'Не удалось загрузить оценки по успеваемости.',
       ),
   })
+  const {
+    data: omissionsData,
+    error: omissionsError,
+    hasData: hasOmissionsData,
+    isInitialLoading: isOmissionsInitialLoading,
+    isRefreshing: isOmissionsRefreshing,
+    reload: reloadOmissions,
+    updatedAt: omissionsUpdatedAt,
+  } = useAsyncResource<OmissionsResponse | null>({
+    enabled: canLoadOmissions,
+    requestKey: canLoadOmissions
+      ? `omissions:${sessionUserId}:${normalizedIisLogin}:${hasIisPassword ? '1' : '0'}`
+      : null,
+    initialData: null,
+    load: loadOmissions,
+    keepPreviousData: true,
+    getErrorMessage: (requestError) =>
+      getApiErrorMessage(
+        requestError,
+        'Не удалось загрузить пропуски по неуважительной причине.',
+      ),
+  })
 
   const displayMessage = hasStudentCardNumber
     ? error
@@ -100,6 +144,8 @@ export const StudyPage = () => {
   const canRenderResults = hasStudentCardNumber && hasData
   const summary = data?.summary
   const subjects = data?.subjects ?? EMPTY_SUBJECTS
+  const omissionMonths = omissionsData?.months ?? EMPTY_OMISSION_MONTHS
+  const omissionTotalHours = omissionsData?.totalHours ?? 0
   const warning = data?.warning
   const { subjectSummaries, rating } = useMemo(
     () => {
@@ -127,6 +173,16 @@ export const StudyPage = () => {
   const studyStatusTone = isRefreshing
     ? 'loading'
     : refreshError
+      ? 'warning'
+      : 'neutral'
+  const omissionsStatusLabel = isOmissionsRefreshing
+    ? 'Обновляем пропуски'
+    : omissionsError && hasOmissionsData
+      ? 'Показаны сохраненные данные'
+      : 'Неуважительные пропуски'
+  const omissionsStatusTone = isOmissionsRefreshing
+    ? 'loading'
+    : omissionsError && hasOmissionsData
       ? 'warning'
       : 'neutral'
 
@@ -242,6 +298,106 @@ export const StudyPage = () => {
 
           <div className="study-student-footnote">
             <span>Специальность, рейтинг и средний балл обновляются из IIS.</span>
+          </div>
+        </section>
+
+        <section className="study-omissions-section">
+          <div className="study-omissions-card">
+            <div className="study-omissions-topline">
+              <div>
+                <h2 className="study-section-title">Пропуски</h2>
+                <p className="study-omissions-subtitle">
+                  Пропуски по неуважительной причине за текущий семестр.
+                </p>
+              </div>
+              <DataRefreshBadge
+                label={omissionsStatusLabel}
+                updatedAt={omissionsUpdatedAt}
+                tone={omissionsStatusTone}
+              />
+            </div>
+
+            {isOmissionsInitialLoading ? (
+              <div className="study-omissions-grid">
+                {Array.from({ length: 4 }).map((_, index) => (
+                  <div
+                    key={`omissions-skeleton:${index}`}
+                    className="study-omissions-month-card"
+                    aria-hidden="true"
+                  >
+                    <span className="app-skeleton study-inline-skeleton study-inline-skeleton--omissions-label" />
+                    <span className="app-skeleton study-inline-skeleton study-inline-skeleton--omissions-value" />
+                  </div>
+                ))}
+              </div>
+            ) : omissionsError && !hasOmissionsData ? (
+              <div className="study-error-card study-error-card--inline">
+                <p className="study-error-text">{omissionsError}</p>
+                <button
+                  type="button"
+                  className="study-retry-button"
+                  onClick={reloadOmissions}
+                >
+                  Повторить запрос
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="study-omissions-summary">
+                  <div className="study-omissions-total">
+                    <span className="study-omissions-total-label">
+                      Всего за семестр
+                    </span>
+                    <strong className="study-omissions-total-value">
+                      {omissionTotalHours} ч.
+                    </strong>
+                  </div>
+                  <p className="study-omissions-note">
+                    Данные загружаются из личного кабинета IIS по сохранённому
+                    логину.
+                  </p>
+                </div>
+
+                {omissionsError && hasOmissionsData && (
+                  <div className="study-error-card study-error-card--inline">
+                    <p className="study-error-text">{omissionsError}</p>
+                    <button
+                      type="button"
+                      className="study-retry-button"
+                      onClick={reloadOmissions}
+                    >
+                      Обновить
+                    </button>
+                  </div>
+                )}
+
+                {omissionMonths.length > 0 ? (
+                  <div className="study-omissions-grid">
+                    {omissionMonths.map((month) => (
+                      <article
+                        key={month.month}
+                        className="study-omissions-month-card"
+                      >
+                        <span className="study-omissions-month-name">
+                          {month.month}
+                        </span>
+                        <strong className="study-omissions-month-value">
+                          {month.omissionCount} ч.
+                        </strong>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="study-empty-card study-empty-card--inline">
+                    <h3 className="study-empty-title">Пропусков нет</h3>
+                    <p className="study-empty-subtitle">
+                      IIS пока не показывает часы пропусков по неуважительной
+                      причине за этот семестр.
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </section>
 

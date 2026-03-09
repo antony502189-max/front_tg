@@ -3057,6 +3057,110 @@ body {
   justify-content: flex-end;
 }
 
+.study-omissions-section {
+  margin-top: 18px;
+}
+
+.study-omissions-card {
+  display: grid;
+  gap: 18px;
+  padding: 22px;
+  border-radius: 24px;
+  border: 1px solid rgba(114, 181, 255, 0.2);
+  background:
+    radial-gradient(circle at top left, rgba(114, 181, 255, 0.12), transparent 28%),
+    linear-gradient(165deg, rgba(14, 24, 39, 0.96), rgba(18, 32, 51, 0.98));
+}
+
+.study-omissions-topline {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.study-omissions-subtitle {
+  margin: 6px 0 0;
+  color: var(--app-text-muted);
+}
+
+.study-omissions-summary {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.study-omissions-total {
+  display: grid;
+  gap: 6px;
+}
+
+.study-omissions-total-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--app-accent);
+}
+
+.study-omissions-total-value {
+  font-size: 32px;
+  font-weight: 900;
+  line-height: 1;
+  color: var(--app-text-strong);
+}
+
+.study-omissions-note {
+  margin: 0;
+  max-width: 320px;
+  color: var(--app-text-muted);
+  text-align: right;
+}
+
+.study-omissions-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.study-omissions-month-card {
+  display: grid;
+  gap: 10px;
+  min-height: 108px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(114, 181, 255, 0.14);
+  background: rgba(10, 19, 31, 0.46);
+}
+
+.study-omissions-month-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--app-text-strong);
+}
+
+.study-omissions-month-value {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--app-accent);
+}
+
+.study-error-card--inline,
+.study-empty-card--inline {
+  margin-top: 0;
+}
+
+.study-inline-skeleton--omissions-label {
+  width: 88px;
+  height: 16px;
+}
+
+.study-inline-skeleton--omissions-value {
+  width: 64px;
+  height: 28px;
+}
+
 .study-metric-icon {
   display: inline-flex;
   align-items: center;
@@ -3905,7 +4009,32 @@ body {
   letter-spacing: 0.01em;
 }
 
+@media (max-width: 720px) {
+  .study-omissions-topline,
+  .study-omissions-summary {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .study-omissions-note {
+    max-width: none;
+    text-align: left;
+  }
+
+  .study-omissions-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 520px) {
+  .study-omissions-card {
+    padding: 18px;
+  }
+
+  .study-omissions-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .schedule-day-section-header {
     padding: 14px 16px;
   }
