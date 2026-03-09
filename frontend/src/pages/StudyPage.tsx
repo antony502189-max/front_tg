@@ -3,13 +3,11 @@ import { Star, Trophy } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { fetchGrades, type GradesResponse } from '../api/grades'
 import { getApiErrorMessage } from '../api/client'
-import { SubgroupToggle } from '../components/user/SubgroupToggle'
 import {
   DataRefreshBadge,
   StudyLoadingState,
 } from '../components/loading/PageLoadingStates'
 import { useAsyncResource } from '../hooks/useAsyncResource'
-import { useSubgroupPreference } from '../hooks/useSubgroupPreference'
 import { useUserStore } from '../store/userStore'
 import { buildStudyOverview, formatMarksLabel } from '../utils/study'
 
@@ -53,12 +51,6 @@ export const StudyPage = () => {
       studentCardNumber: state.studentCardNumber,
     })),
   )
-  const {
-    subgroup,
-    isSaving: isSavingSubgroup,
-    error: subgroupError,
-    setSubgroup,
-  } = useSubgroupPreference()
 
   const normalizedStudentCardNumber = studentCardNumber.trim()
   const normalizedGroupNumber = groupNumber.trim()
@@ -124,10 +116,6 @@ export const StudyPage = () => {
   const studyMetaLabel = normalizedGroupNumber
     ? `Группа ${normalizedGroupNumber}`
     : 'Группа не указана'
-  const subgroupLabel =
-    subgroup === 'all'
-      ? 'Все пары'
-      : `${subgroup}-я подгруппа`
   const studyStatusLabel = isRefreshing
     ? 'Обновляем данные'
     : refreshError
@@ -252,35 +240,6 @@ export const StudyPage = () => {
           <div className="study-student-footnote">
             <span>Специальность, рейтинг и средний балл обновляются из IIS.</span>
           </div>
-        </section>
-
-        <section className="study-subgroup-card">
-          <div className="study-subgroup-header">
-            <div>
-              <h2 className="study-section-title">Подгруппа для расписания</h2>
-              <p className="study-subgroup-text">
-                По умолчанию показываются все пары. Если в один слот попадает
-                несколько занятий, переключитесь на нужную подгруппу.
-              </p>
-            </div>
-            <span className="study-subgroup-badge">{subgroupLabel}</span>
-          </div>
-
-          <SubgroupToggle
-            value={subgroup}
-            onChange={setSubgroup}
-            ariaLabel="Выбор подгруппы для расписания"
-          />
-
-          <p className="study-subgroup-note">
-            {isSavingSubgroup
-              ? 'Сохраняем выбор подгруппы…'
-              : 'Выбранная подгруппа сразу применяется во вкладке «Расписание».'}
-          </p>
-
-          {subgroupError && (
-            <p className="study-subgroup-error">{subgroupError}</p>
-          )}
         </section>
 
         {isInitialLoading && <StudyLoadingState />}

@@ -751,13 +751,87 @@ def extract_lesson_subgroups(raw_lesson: dict[str, Any]) -> set[str]:
     return result
 
 
+SCHEDULE_SUBGROUP_OVERRIDES: dict[tuple[str, str, str], str] = {
+    ("568403", normalize_lookup_value("Иностранный язык"), "i-malikova"): "2",
+    ("568403", normalize_lookup_value("Иностранный язык"), "o-shulga"): "1",
+}
+
+
+def extract_schedule_group_name(payload: Any) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+
+    student_group = payload.get("studentGroupDto")
+    if not isinstance(student_group, dict):
+        return None
+
+    value = first_non_empty_field(student_group, "name")
+    if value is None:
+        return None
+
+    normalized = str(value).strip()
+    return normalized or None
+
+
+def extract_lesson_teacher_keys(raw_lesson: dict[str, Any]) -> list[str]:
+    employees = raw_lesson.get("employees")
+    if not isinstance(employees, list) or not employees:
+        return []
+
+    first_employee = employees[0]
+    if not isinstance(first_employee, dict):
+        return []
+
+    keys: list[str] = []
+    for value in (
+        first_non_empty_field(first_employee, "urlId", "urlID"),
+        compose_full_name(first_employee),
+    ):
+        normalized = normalize_lookup_value(value)
+        if normalized and normalized not in keys:
+            keys.append(normalized)
+
+    return keys
+
+
+def resolve_override_subgroups(
+    raw_lesson: dict[str, Any],
+    student_group: str | None,
+) -> set[str]:
+    if not student_group:
+        return set()
+
+    subject = normalize_lookup_value(
+        first_non_empty_field(raw_lesson, "subjectFullName", "subject")
+    )
+    if not subject:
+        return set()
+
+    for teacher_key in extract_lesson_teacher_keys(raw_lesson):
+        subgroup = SCHEDULE_SUBGROUP_OVERRIDES.get(
+            (student_group, subject, teacher_key)
+        )
+        if subgroup:
+            return {subgroup}
+
+    return set()
+
+
 def resolve_lesson_subgroups(
     raw_lesson: dict[str, Any],
     inferred_subgroups: set[str] | None = None,
+    *,
+    student_group: str | None = None,
 ) -> set[str]:
     explicit_subgroups = extract_lesson_subgroups(raw_lesson)
     if explicit_subgroups:
         return explicit_subgroups
+    override_subgroups = resolve_override_subgroups(
+        raw_lesson,
+        student_group,
+    )
+    if override_subgroups:
+        return override_subgroups
     if inferred_subgroups:
         return set(inferred_subgroups)
     return set()
@@ -852,6 +926,8 @@ def lesson_matches_subgroup(
     raw_lesson: dict[str, Any],
     subgroup: str,
     inferred_subgroups: set[str] | None = None,
+    *,
+    student_group: str | None = None,
 ) -> bool:
     if subgroup == "all":
         return True
@@ -859,6 +935,7 @@ def lesson_matches_subgroup(
     lesson_subgroups = resolve_lesson_subgroups(
         raw_lesson,
         inferred_subgroups,
+        student_group=student_group,
     )
     if not lesson_subgroups:
         return True
@@ -872,6 +949,7 @@ def normalize_schedule_lesson(
     index: int,
     *,
     lesson_subgroups: set[str] | None = None,
+    student_group: str | None = None,
 ) -> dict[str, Any]:
     subject = (
         first_non_empty_field(raw_lesson, "subjectFullName", "subject")
@@ -907,6 +985,7 @@ def normalize_schedule_lesson(
     resolved_subgroups = resolve_lesson_subgroups(
         raw_lesson,
         lesson_subgroups,
+        student_group=student_group,
     )
     subgroup = (
         next(iter(resolved_subgroups))
@@ -942,6 +1021,7 @@ def normalize_schedule_response(
     subgroup: str = "all",
 ) -> dict[str, Any]:
     schedules = payload.get("schedules") if isinstance(payload, dict) else None
+    student_group = extract_schedule_group_name(payload)
     normalized_view = normalize_schedule_view(view)
     target_date = reference_date or today_value
     range_start, range_end = resolve_schedule_range(
@@ -988,6 +1068,7 @@ def normalize_schedule_response(
                     item,
                     subgroup,
                     lesson_subgroups,
+                    student_group=student_group,
                 ):
                     continue
                 lessons.append(
@@ -996,6 +1077,7 @@ def normalize_schedule_response(
                         lesson_date,
                         index,
                         lesson_subgroups=lesson_subgroups,
+                        student_group=student_group,
                     )
                 )
 

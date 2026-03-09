@@ -612,6 +612,57 @@ class BackendServerTests(unittest.TestCase):
             ["Лекция", "Лаба в 517"],
         )
 
+    def test_normalize_schedule_response_applies_group_subgroup_overrides(
+        self,
+    ) -> None:
+        payload = {
+            "studentGroupDto": {"name": "568403"},
+            "schedules": {
+                "Четверг": [
+                    {
+                        "subject": "ИнЯз",
+                        "subjectFullName": "Иностранный язык",
+                        "startLessonTime": "13:35",
+                        "endLessonTime": "15:00",
+                        "weekNumber": [4],
+                        "auditories": ["507-1-3 к."],
+                        "employees": [{"urlId": "i-malikova", "fio": "Маликова И. Г."}],
+                        "startLessonDate": "12.02.2026",
+                        "endLessonDate": "04.06.2026",
+                    },
+                    {
+                        "subject": "ИнЯз",
+                        "subjectFullName": "Иностранный язык",
+                        "startLessonTime": "13:35",
+                        "endLessonTime": "15:00",
+                        "weekNumber": [4],
+                        "auditories": ["302-3 к."],
+                        "employees": [{"urlId": "o-shulga", "fio": "Шульга О. Н."}],
+                        "startLessonDate": "12.02.2026",
+                        "endLessonDate": "04.06.2026",
+                    },
+                ]
+            },
+        }
+
+        normalized = normalize_schedule_response(
+            payload,
+            4,
+            date(2026, 3, 9),
+            reference_date=date(2026, 3, 12),
+            subgroup="1",
+        )
+
+        thursday = next(
+            day
+            for day in normalized["days"]
+            if day["date"] == "2026-03-12"
+        )
+        self.assertEqual(
+            [lesson["teacher"] for lesson in thursday["lessons"]],
+            ["Шульга О. Н."],
+        )
+
     def test_schedule_route_returns_frontend_contract(self) -> None:
         def fetcher(path: str, _params: dict[str, str]):
             if path == "/schedule":

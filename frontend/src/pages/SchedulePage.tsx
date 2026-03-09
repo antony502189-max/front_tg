@@ -64,13 +64,20 @@ const shortDateFormatter = new Intl.DateTimeFormat('ru-RU', {
   month: '2-digit',
 })
 
+type ScheduleLessonView = Lesson & {
+  status: LessonCardStatus
+}
+
+type ScheduleTimeSlotView = {
+  key: string
+  lessons: ScheduleLessonView[]
+  breakMinutesAfter: number | null
+}
+
 type ScheduleDayView = {
   date: string
-  lessons: Array<
-    Lesson & {
-      status: LessonCardStatus
-    }
-  >
+  lessons: ScheduleLessonView[]
+  slots: ScheduleTimeSlotView[]
 }
 
 const LESSON_COUNT_LABELS: Record<number, string> = {
@@ -179,6 +186,77 @@ const getLessonStatus = (
 
   return 'upcoming'
 }
+
+const timeToMinutes = (value: string) => {
+  const [hours, minutes] = value.split(':').map(Number)
+
+  if (
+    !Number.isFinite(hours) ||
+    !Number.isFinite(minutes)
+  ) {
+    return null
+  }
+
+  return hours * 60 + minutes
+}
+
+const getBreakMinutes = (
+  endTime: string,
+  nextStartTime: string,
+) => {
+  const endMinutes = timeToMinutes(endTime)
+  const nextStartMinutes = timeToMinutes(nextStartTime)
+
+  if (
+    endMinutes === null ||
+    nextStartMinutes === null ||
+    nextStartMinutes <= endMinutes
+  ) {
+    return null
+  }
+
+  return nextStartMinutes - endMinutes
+}
+
+const groupLessonsByTimeSlots = (
+  lessons: ScheduleLessonView[],
+): ScheduleTimeSlotView[] => {
+  const slots: Array<{
+    key: string
+    startTime: string
+    endTime: string
+    lessons: ScheduleLessonView[]
+  }> = []
+
+  lessons.forEach((lesson, index) => {
+    const slotKey = `${lesson.startTime}-${lesson.endTime}`
+    const currentSlot = slots[slots.length - 1]
+
+    if (currentSlot && currentSlot.key === slotKey) {
+      currentSlot.lessons.push(lesson)
+      return
+    }
+
+    slots.push({
+      key: `${slotKey}-${index}`,
+      startTime: lesson.startTime,
+      endTime: lesson.endTime,
+      lessons: [lesson],
+    })
+  })
+
+  return slots.map((slot, index) => ({
+    key: slot.key,
+    lessons: slot.lessons,
+    breakMinutesAfter:
+      index < slots.length - 1
+        ? getBreakMinutes(slot.endTime, slots[index + 1].startTime)
+        : null,
+  }))
+}
+
+const formatBreakLabel = (minutes: number) =>
+  minutes === 1 ? '1 минута' : `${minutes} минут`
 
 const getRelativeDayLabel = (dateKey: string, todayKey: string) => {
   if (dateKey === todayKey) {
@@ -417,13 +495,18 @@ export const SchedulePage = () => {
   const visibleDays = useMemo<ScheduleDayView[]>(() => {
     const days = rawDays ?? []
     const now = new Date()
-    const mappedDays = days.map((day) => ({
-      date: day.date,
-      lessons: day.lessons.map((lesson) => ({
+    const mappedDays = days.map((day) => {
+      const lessons = day.lessons.map((lesson) => ({
         ...lesson,
         status: getLessonStatus(lesson, now),
-      })),
-    }))
+      }))
+
+      return {
+        date: day.date,
+        lessons,
+        slots: groupLessonsByTimeSlots(lessons),
+      }
+    })
 
     if (view === 'day' || view === 'semester') {
       return mappedDays
@@ -698,12 +781,25 @@ export const SchedulePage = () => {
 
                     {day.lessons.length > 0 ? (
                       <div className="schedule-lessons-list">
-                        {day.lessons.map((lesson) => (
-                          <LessonCard
-                            key={lesson.id}
-                            lesson={lesson}
-                            status={lesson.status}
-                          />
+                        {day.slots.map((slot) => (
+                          <div
+                            key={slot.key}
+                            className="schedule-slot-group"
+                          >
+                            {slot.lessons.map((lesson) => (
+                              <LessonCard
+                                key={lesson.id}
+                                lesson={lesson}
+                                status={lesson.status}
+                              />
+                            ))}
+
+                            {slot.breakMinutesAfter !== null && (
+                              <div className="schedule-break-label">
+                                {formatBreakLabel(slot.breakMinutesAfter)}
+                              </div>
+                            )}
+                          </div>
                         ))}
                       </div>
                     ) : (
