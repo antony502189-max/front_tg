@@ -22,7 +22,9 @@ import {
   DataRefreshBadge,
   ScheduleLoadingState,
 } from '../components/loading/PageLoadingStates'
+import { SubgroupToggle } from '../components/user/SubgroupToggle'
 import { useAsyncResource } from '../hooks/useAsyncResource'
+import { useSubgroupPreference } from '../hooks/useSubgroupPreference'
 import { getInitials } from '../utils/university'
 import { useScheduleStore, type Lesson } from '../store/scheduleStore'
 import { useUserStore } from '../store/userStore'
@@ -51,6 +53,15 @@ const dayFormatter = new Intl.DateTimeFormat('ru-RU', {
 const rangeFormatter = new Intl.DateTimeFormat('ru-RU', {
   day: 'numeric',
   month: 'short',
+})
+
+const weekdayFormatter = new Intl.DateTimeFormat('ru-RU', {
+  weekday: 'long',
+})
+
+const shortDateFormatter = new Intl.DateTimeFormat('ru-RU', {
+  day: '2-digit',
+  month: '2-digit',
 })
 
 type ScheduleDayView = {
@@ -98,6 +109,25 @@ const formatScheduleDate = (dateKey: string) => {
 
   const formatted = dayFormatter.format(parsed)
   return formatted.charAt(0).toUpperCase() + formatted.slice(1)
+}
+
+const formatScheduleWeekday = (dateKey: string) => {
+  const parsed = parseDateKey(dateKey)
+  if (!parsed) {
+    return dateKey
+  }
+
+  const formatted = weekdayFormatter.format(parsed)
+  return formatted.charAt(0).toUpperCase() + formatted.slice(1)
+}
+
+const formatScheduleShortDate = (dateKey: string) => {
+  const parsed = parseDateKey(dateKey)
+  if (!parsed) {
+    return dateKey
+  }
+
+  return shortDateFormatter.format(parsed)
 }
 
 const formatScheduleRange = (
@@ -150,17 +180,6 @@ const getLessonStatus = (
   return 'upcoming'
 }
 
-const lessonMatchesSubgroup = (
-  lesson: Lesson,
-  subgroup: 'all' | '1' | '2',
-) => {
-  if (subgroup === 'all') {
-    return true
-  }
-
-  return !lesson.subgroup || lesson.subgroup === subgroup
-}
-
 const getRelativeDayLabel = (dateKey: string, todayKey: string) => {
   if (dateKey === todayKey) {
     return 'Сегодня'
@@ -180,7 +199,7 @@ const getRelativeDayLabel = (dateKey: string, todayKey: string) => {
 }
 
 export const SchedulePage = () => {
-  const { role, groupNumber, urlId, employeeId, fullName, subgroup } =
+  const { role, groupNumber, urlId, employeeId, fullName } =
     useUserStore(
       useShallow((state) => ({
         role: state.role,
@@ -188,9 +207,14 @@ export const SchedulePage = () => {
         urlId: state.urlId,
         employeeId: state.employeeId,
         fullName: state.fullName,
-        subgroup: state.subgroup,
       })),
     )
+  const {
+    subgroup,
+    isSaving: isSavingSubgroup,
+    error: subgroupError,
+    setSubgroup,
+  } = useSubgroupPreference()
   const {
     setSchedule,
     clearSchedule,
@@ -233,6 +257,8 @@ export const SchedulePage = () => {
     effectiveRole === 'teacher'
       ? TEACHER_VIEW_OPTIONS
       : DEFAULT_VIEW_OPTIONS
+  const effectiveSubgroup =
+    effectiveRole === 'teacher' ? 'all' : subgroup
 
   const previousPreviewRef = useRef(isTeacherPreview)
   const previousPreviewTeacherIdRef = useRef(activeTeacherUrlId)
@@ -283,7 +309,7 @@ export const SchedulePage = () => {
             ? activeTeacherUrlId
             : normalizedGroupNumber,
           activeTeacherEmployeeId,
-          subgroup,
+          effectiveSubgroup,
           view,
           referenceDate,
         ].join(':')
@@ -308,7 +334,7 @@ export const SchedulePage = () => {
           groupNumber: normalizedGroupNumber,
           teacherUrlId: activeTeacherUrlId,
           teacherEmployeeId: activeTeacherEmployeeId,
-          subgroup,
+          subgroup: effectiveSubgroup,
         },
         signal,
       )
@@ -317,9 +343,9 @@ export const SchedulePage = () => {
       activeTeacherEmployeeId,
       activeTeacherUrlId,
       effectiveRole,
+      effectiveSubgroup,
       normalizedGroupNumber,
       referenceDate,
-      subgroup,
       view,
     ],
   )
@@ -393,12 +419,10 @@ export const SchedulePage = () => {
     const now = new Date()
     const mappedDays = days.map((day) => ({
       date: day.date,
-      lessons: day.lessons
-        .filter((lesson) => lessonMatchesSubgroup(lesson, subgroup))
-        .map((lesson) => ({
-          ...lesson,
-          status: getLessonStatus(lesson, now),
-        })),
+      lessons: day.lessons.map((lesson) => ({
+        ...lesson,
+        status: getLessonStatus(lesson, now),
+      })),
     }))
 
     if (view === 'day' || view === 'semester') {
@@ -406,7 +430,7 @@ export const SchedulePage = () => {
     }
 
     return mappedDays.filter((day) => day.lessons.length > 0)
-  }, [rawDays, subgroup, view])
+  }, [rawDays, view])
 
   const rangeLabel = formatScheduleRange(
     data?.rangeStart ?? referenceDate,
@@ -427,6 +451,10 @@ export const SchedulePage = () => {
         ? 'Просматриваете расписание преподавателя, выбранного во вкладке ВУЗ.'
         : 'Смотрите персональное расписание преподавателя по urlId.'
       : 'Смотрите расписание по номеру вашей учебной группы.'
+  const subgroupLabel =
+    effectiveSubgroup === 'all'
+      ? 'Все пары'
+      : `${effectiveSubgroup}-я подгруппа`
   const refreshBadge = isRefreshing ? (
     <DataRefreshBadge
       label="Обновляем расписание"
@@ -528,6 +556,38 @@ export const SchedulePage = () => {
             })}
           </div>
 
+          {effectiveRole !== 'teacher' && (
+            <div className="schedule-subgroup-panel">
+              <div className="schedule-subgroup-copy">
+                <span className="schedule-subgroup-label">Подгруппа</span>
+                <strong className="schedule-subgroup-value">
+                  {subgroupLabel}
+                </strong>
+                <p className="schedule-subgroup-text">
+                  По умолчанию показываются все пары. Если в одном слоте идут
+                  разные занятия, переключитесь на нужную подгруппу.
+                </p>
+              </div>
+
+              <SubgroupToggle
+                value={subgroup}
+                onChange={setSubgroup}
+                ariaLabel="Быстрый выбор подгруппы в расписании"
+                className="schedule-subgroup-toggle"
+              />
+
+              <p className="schedule-subgroup-note">
+                {isSavingSubgroup
+                  ? 'Сохраняем выбор подгруппы…'
+                  : 'Переключатель синхронизирован с профилем.'}
+              </p>
+
+              {subgroupError && (
+                <p className="schedule-subgroup-error">{subgroupError}</p>
+              )}
+            </div>
+          )}
+
           <div className="schedule-period-bar">
             <button
               type="button"
@@ -622,16 +682,18 @@ export const SchedulePage = () => {
                     }`}
                   >
                     <header className="schedule-day-section-header">
-                      <div>
-                        <h2 className="schedule-section-title">
-                          {relativeDayLabel ?? formatScheduleDate(day.date)}
-                        </h2>
-                        <p className="schedule-day-section-subtitle">
-                          {relativeDayLabel
-                            ? `${formatScheduleDate(day.date)} · ${lessonsLabel}`
-                            : lessonsLabel}
-                        </p>
-                      </div>
+                      <h2 className="schedule-section-title schedule-day-title">
+                        {formatScheduleWeekday(day.date)}
+                      </h2>
+                      <p className="schedule-day-section-subtitle">
+                        {[
+                          relativeDayLabel?.toLowerCase(),
+                          formatScheduleShortDate(day.date),
+                          lessonsLabel,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </p>
                     </header>
 
                     {day.lessons.length > 0 ? (

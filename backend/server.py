@@ -751,11 +751,115 @@ def extract_lesson_subgroups(raw_lesson: dict[str, Any]) -> set[str]:
     return result
 
 
-def lesson_matches_subgroup(raw_lesson: dict[str, Any], subgroup: str) -> bool:
+def resolve_lesson_subgroups(
+    raw_lesson: dict[str, Any],
+    inferred_subgroups: set[str] | None = None,
+) -> set[str]:
+    explicit_subgroups = extract_lesson_subgroups(raw_lesson)
+    if explicit_subgroups:
+        return explicit_subgroups
+    if inferred_subgroups:
+        return set(inferred_subgroups)
+    return set()
+
+
+def lesson_time_slot_key(raw_lesson: dict[str, Any]) -> tuple[str, str] | None:
+    start_time = first_non_empty_field(raw_lesson, "startLessonTime") or ""
+    end_time = first_non_empty_field(raw_lesson, "endLessonTime") or ""
+
+    if not start_time and not end_time:
+        return None
+
+    return (str(start_time), str(end_time))
+
+
+def lesson_inference_signature(raw_lesson: dict[str, Any]) -> tuple[str, str, str]:
+    subject = (
+        first_non_empty_field(raw_lesson, "subjectFullName", "subject")
+        or ""
+    )
+    room = ""
+    auditories = raw_lesson.get("auditories")
+    if isinstance(auditories, list):
+        normalized_rooms = [
+            value.strip()
+            for value in auditories
+            if isinstance(value, str) and value.strip()
+        ]
+        room = ", ".join(normalized_rooms)
+
+    teacher = ""
+    employees = raw_lesson.get("employees")
+    if isinstance(employees, list) and employees:
+        first_employee = employees[0]
+        if isinstance(first_employee, dict):
+            teacher = compose_full_name(first_employee) or ""
+
+    return (str(subject).strip(), room, teacher)
+
+
+def infer_lesson_subgroups(
+    raw_lessons: list[tuple[int, dict[str, Any]]],
+) -> dict[int, set[str]]:
+    slot_items: dict[tuple[str, str], list[tuple[int, dict[str, Any]]]] = {}
+    for index, raw_lesson in raw_lessons:
+        slot_key = lesson_time_slot_key(raw_lesson)
+        if slot_key is None:
+            continue
+        slot_items.setdefault(slot_key, []).append((index, raw_lesson))
+
+    inferred: dict[int, set[str]] = {}
+    for items in slot_items.values():
+        if len(items) != 2:
+            continue
+
+        if len({lesson_inference_signature(item) for _, item in items}) < 2:
+            continue
+
+        explicit_subgroups = {
+            index: extract_lesson_subgroups(raw_lesson)
+            for index, raw_lesson in items
+        }
+        explicit_items = [
+            (index, subgroups)
+            for index, subgroups in explicit_subgroups.items()
+            if subgroups
+        ]
+
+        if len(explicit_items) == 2:
+            continue
+
+        if len(explicit_items) == 1:
+            explicit_index, explicit_values = explicit_items[0]
+            if len(explicit_values) != 1:
+                continue
+
+            explicit_value = next(iter(explicit_values))
+            other_value = "2" if explicit_value == "1" else "1"
+
+            for index, _ in items:
+                if index != explicit_index:
+                    inferred[index] = {other_value}
+            continue
+
+        inferred[items[0][0]] = {"1"}
+        inferred[items[1][0]] = {"2"}
+
+    return inferred
+
+
+def lesson_matches_subgroup(
+    raw_lesson: dict[str, Any],
+    subgroup: str,
+    inferred_subgroups: set[str] | None = None,
+) -> bool:
     if subgroup == "all":
         return True
 
-    lesson_subgroups = extract_lesson_subgroups(raw_lesson)
+    lesson_subgroups = resolve_lesson_subgroups(
+        raw_lesson,
+        inferred_subgroups,
+    )
     if not lesson_subgroups:
         return True
 
@@ -766,6 +870,8 @@ def normalize_schedule_lesson(
     raw_lesson: dict[str, Any],
     lesson_date: date,
     index: int,
+    *,
+    lesson_subgroups: set[str] | None = None,
 ) -> dict[str, Any]:
     subject = (
         first_non_empty_field(raw_lesson, "subjectFullName", "subject")
@@ -798,10 +904,13 @@ def normalize_schedule_lesson(
     start_time = first_non_empty_field(raw_lesson, "startLessonTime") or ""
     end_time = first_non_empty_field(raw_lesson, "endLessonTime") or ""
     date_value = lesson_date.isoformat()
-    lesson_subgroups = extract_lesson_subgroups(raw_lesson)
+    resolved_subgroups = resolve_lesson_subgroups(
+        raw_lesson,
+        lesson_subgroups,
+    )
     subgroup = (
-        next(iter(lesson_subgroups))
-        if len(lesson_subgroups) == 1
+        next(iter(resolved_subgroups))
+        if len(resolved_subgroups) == 1
         else None
     )
 
@@ -862,6 +971,7 @@ def normalize_schedule_response(
         )
 
         if isinstance(raw_lessons, list):
+            matched_lessons: list[tuple[int, dict[str, Any]]] = []
             for index, item in enumerate(raw_lessons):
                 if not isinstance(item, dict):
                     continue
@@ -869,10 +979,24 @@ def normalize_schedule_response(
                     continue
                 if not lesson_matches_date(item, lesson_date):
                     continue
-                if not lesson_matches_subgroup(item, subgroup):
+                matched_lessons.append((index, item))
+
+            inferred_subgroups = infer_lesson_subgroups(matched_lessons)
+            for index, item in matched_lessons:
+                lesson_subgroups = inferred_subgroups.get(index)
+                if not lesson_matches_subgroup(
+                    item,
+                    subgroup,
+                    lesson_subgroups,
+                ):
                     continue
                 lessons.append(
-                    normalize_schedule_lesson(item, lesson_date, index)
+                    normalize_schedule_lesson(
+                        item,
+                        lesson_date,
+                        index,
+                        lesson_subgroups=lesson_subgroups,
+                    )
                 )
 
         lessons.sort(key=lambda lesson: (lesson["startTime"], lesson["subject"]))

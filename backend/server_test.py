@@ -253,6 +253,7 @@ class BackendServerTests(unittest.TestCase):
                 "studentGroup": "353502",
                 "teacherUrlId": "",
                 "teacherEmployeeId": "",
+                "subgroup": "all",
                 "view": "week",
                 "date": "2026-03-04",
             },
@@ -552,6 +553,64 @@ class BackendServerTests(unittest.TestCase):
             ["Общая пара", "Подгруппа 1"],
         )
 
+    def test_normalize_schedule_response_infers_subgroups_from_parallel_lessons(
+        self,
+    ) -> None:
+        payload = {
+            "schedules": {
+                "Понедельник": [
+                    {
+                        "subject": "Лекция",
+                        "startLessonTime": "08:00",
+                        "endLessonTime": "09:25",
+                        "weekNumber": [3],
+                        "startLessonDate": "01.01.2026",
+                        "endLessonDate": "31.12.2026",
+                    },
+                    {
+                        "subject": "Лаба в 416",
+                        "startLessonTime": "10:00",
+                        "endLessonTime": "11:25",
+                        "weekNumber": [3],
+                        "auditories": ["416-4"],
+                        "startLessonDate": "01.01.2026",
+                        "endLessonDate": "31.12.2026",
+                    },
+                    {
+                        "subject": "Лаба в 517",
+                        "startLessonTime": "10:00",
+                        "endLessonTime": "11:25",
+                        "weekNumber": [3],
+                        "auditories": ["517-2"],
+                        "startLessonDate": "01.01.2026",
+                        "endLessonDate": "31.12.2026",
+                    },
+                ]
+            }
+        }
+
+        normalized_all = normalize_schedule_response(
+            payload,
+            3,
+            date(2026, 3, 4),
+        )
+        monday_all = normalized_all["days"][0]["lessons"]
+        self.assertEqual(
+            [lesson["subgroup"] for lesson in monday_all],
+            [None, "1", "2"],
+        )
+
+        normalized_second = normalize_schedule_response(
+            payload,
+            3,
+            date(2026, 3, 4),
+            subgroup="2",
+        )
+        monday_second = normalized_second["days"][0]
+        self.assertEqual(
+            [lesson["subject"] for lesson in monday_second["lessons"]],
+            ["Лекция", "Лаба в 517"],
+        )
 
     def test_schedule_route_returns_frontend_contract(self) -> None:
         def fetcher(path: str, _params: dict[str, str]):
