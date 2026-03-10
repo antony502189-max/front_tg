@@ -8,6 +8,7 @@ from threading import Event, Lock, Thread
 from backend.server import (
     BackendApp,
     CacheEntry,
+    EMPLOYEE_SEARCH_TIMEOUT_MS,
     MAX_REQUEST_BODY_BYTES,
     REQUEST_BODY_TOO_LARGE_MESSAGE,
     RequestBodyTooLargeError,
@@ -2144,7 +2145,10 @@ class BackendServerTests(unittest.TestCase):
                 (
                     "/employees/fio",
                     {"employee-fio": "Пе"},
-                    TEST_CONFIG["request_timeout_ms"],
+                    max(
+                        TEST_CONFIG["request_timeout_ms"],
+                        EMPLOYEE_SEARCH_TIMEOUT_MS,
+                    ),
                     0,
                 )
             ],

@@ -11,6 +11,7 @@ type UserData = {
   studentCardNumber: string
   iisLogin: string
   hasIisPassword: boolean
+  profileUpdatedAt: string
   employeeId: string
   urlId: string
   fullName: string
@@ -37,6 +38,7 @@ const defaultState: UserData = {
   studentCardNumber: '',
   iisLogin: '',
   hasIisPassword: false,
+  profileUpdatedAt: '',
   employeeId: '',
   urlId: '',
   fullName: '',
@@ -83,6 +85,10 @@ const sanitizePersistedUser = (
       typeof persisted?.hasIisPassword === 'boolean'
         ? persisted.hasIisPassword
         : defaultState.hasIisPassword,
+    profileUpdatedAt:
+      typeof persisted?.profileUpdatedAt === 'string'
+        ? persisted.profileUpdatedAt
+        : defaultState.profileUpdatedAt,
     employeeId:
       typeof persisted?.employeeId === 'string'
         ? persisted.employeeId
@@ -122,6 +128,7 @@ const mapProfileToState = (profile: UserProfile): UserData => ({
     profile.studentCardNumber?.trim() ?? profile.iisLogin?.trim() ?? '',
   iisLogin: profile.iisLogin?.trim() ?? '',
   hasIisPassword: profile.hasIisPassword === true,
+  profileUpdatedAt: profile.updatedAt?.trim() ?? '',
   employeeId: profile.employeeId?.trim() ?? '',
   urlId: profile.urlId?.trim() ?? '',
   fullName: profile.fullName?.trim() ?? '',
@@ -165,6 +172,7 @@ export const useUserStore = create<UserState>()(
         studentCardNumber: state.studentCardNumber,
         iisLogin: state.iisLogin,
         hasIisPassword: state.hasIisPassword,
+        profileUpdatedAt: state.profileUpdatedAt,
         employeeId: state.employeeId,
         urlId: state.urlId,
         fullName: state.fullName,

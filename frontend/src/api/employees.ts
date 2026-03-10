@@ -1,12 +1,9 @@
-import { apiGet, DEFAULT_API_TIMEOUT_MS } from './client'
+import { apiGet } from './client'
 import type { EmployeeSearchResult } from '../types/user'
 
 export type Employee = EmployeeSearchResult
 
-const EMPLOYEE_SEARCH_TIMEOUT_MS = Math.min(
-  DEFAULT_API_TIMEOUT_MS,
-  4_000,
-)
+const EMPLOYEE_SEARCH_TIMEOUT_MS = 12_000
 
 export async function searchTeachers(
   query: string,

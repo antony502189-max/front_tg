@@ -41,6 +41,7 @@ const OTHER_PROGRESS_MARK_COLUMN = {
   key: 'other' as const,
   label: 'Др.',
 }
+const IIS_AUTH_ERROR_MARKER = 'авторизоваться в iis'
 
 type SubjectOmissionLookup = {
   exact: Map<string, number>
@@ -122,6 +123,12 @@ const resolveSubjectOmissionCount = (
   return abbreviationValue === null ? undefined : abbreviationValue
 }
 
+const isIisAuthorizationError = (message: string | null) =>
+  typeof message === 'string' &&
+  message
+    .toLocaleLowerCase('ru-RU')
+    .includes(IIS_AUTH_ERROR_MARKER)
+
 const StudyMetricValue = ({
   isLoading,
   value,
@@ -171,6 +178,7 @@ export const StudyPage = () => {
     studentCardNumber,
     iisLogin,
     hasIisPassword,
+    profileUpdatedAt,
   } = useUserStore(
     useShallow((state) => ({
       role: state.role,
@@ -178,12 +186,14 @@ export const StudyPage = () => {
       studentCardNumber: state.studentCardNumber,
       iisLogin: state.iisLogin,
       hasIisPassword: state.hasIisPassword,
+      profileUpdatedAt: state.profileUpdatedAt,
     })),
   )
 
   const sessionUserId = resolveSessionUserId()
   const normalizedSessionUserId = sessionUserId.trim()
   const normalizedIisLogin = iisLogin.trim()
+  const normalizedProfileUpdatedAt = profileUpdatedAt.trim()
   const normalizedStudentCardNumber =
     studentCardNumber.trim() || normalizedIisLogin
   const normalizedGroupNumber = groupNumber.trim()
@@ -202,7 +212,7 @@ export const StudyPage = () => {
     ? `grades-summary:${normalizedStudentCardNumber}:${normalizedGroupNumber || 'nogroup'}`
     : null
   const omissionsPersistentCacheKey = canLoadOmissions
-    ? `omissions:${normalizedSessionUserId}:${normalizedIisLogin}`
+    ? `omissions:${normalizedSessionUserId}:${normalizedIisLogin}:${normalizedProfileUpdatedAt || 'v0'}`
     : null
 
   const loadGrades = useCallback(
@@ -290,7 +300,7 @@ export const StudyPage = () => {
   } = useAsyncResource<OmissionsResponse | null>({
     enabled: canLoadOmissions,
     requestKey: canLoadOmissions
-      ? `omissions:${normalizedSessionUserId}:${normalizedIisLogin}:${hasIisPassword ? '1' : '0'}`
+      ? `omissions:${normalizedSessionUserId}:${normalizedIisLogin}:${hasIisPassword ? '1' : '0'}:${normalizedProfileUpdatedAt || 'v0'}`
       : null,
     initialData: null,
     load: loadOmissions,
@@ -331,6 +341,11 @@ export const StudyPage = () => {
     (summaryError && hasData && summary?.position === undefined
       ? summaryError
       : undefined)
+  const hasBlockingOmissionsError = isIisAuthorizationError(
+    omissionsError,
+  )
+  const hasVisibleOmissionsData =
+    hasOmissionsData && !hasBlockingOmissionsError
   const omissionsSetupMessage = hasIisCredentials
     ? null
     : normalizedIisLogin.length > 0
@@ -401,12 +416,14 @@ export const StudyPage = () => {
       : 'neutral'
   const omissionsStatusLabel = isOmissionsRefreshing
     ? 'Обновляем пропуски'
-    : omissionsError && hasOmissionsData
+    : hasBlockingOmissionsError
+      ? 'Ошибка авторизации IIS'
+      : omissionsError && hasVisibleOmissionsData
       ? 'Показаны сохраненные данные'
       : 'Неуважительные пропуски'
   const omissionsStatusTone = isOmissionsRefreshing
     ? 'loading'
-    : omissionsError && hasOmissionsData
+    : hasBlockingOmissionsError || (omissionsError && hasVisibleOmissionsData)
       ? 'warning'
       : 'neutral'
 
@@ -562,7 +579,7 @@ export const StudyPage = () => {
                   {omissionsSetupMessage}
                 </p>
               </div>
-            ) : omissionsError && !hasOmissionsData ? (
+            ) : omissionsError && !hasVisibleOmissionsData ? (
               <div className="study-error-card study-error-card--inline">
                 <p className="study-error-text">{omissionsError}</p>
                 <button
@@ -590,7 +607,7 @@ export const StudyPage = () => {
                   </p>
                 </div>
 
-                {omissionsError && hasOmissionsData && (
+                {omissionsError && hasVisibleOmissionsData && (
                   <div className="study-error-card study-error-card--inline">
                     <p className="study-error-text">{omissionsError}</p>
                     <button

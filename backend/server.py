@@ -108,7 +108,7 @@ RUSSIAN_WEEKDAY_TO_INDEX = {
 
 GRADES_SEARCH_TIMEOUT_MS = 4_000
 GRADES_RATING_LIST_TIMEOUT_MS = 60_000
-EMPLOYEE_SEARCH_TIMEOUT_MS = 4_000
+EMPLOYEE_SEARCH_TIMEOUT_MS = 8_000
 RATING_DIRECTORY_CACHE_TTL_MS = 3_600_000
 CACHE_PRUNE_INTERVAL_MS = 60_000
 MAX_REQUEST_BODY_BYTES = 1_048_576
@@ -2646,7 +2646,7 @@ class BackendApp:
             employees_payload = self.request_upstream_with_timeout(
                 "/employees/fio",
                 {"employee-fio": candidate},
-                timeout_ms=min(
+                timeout_ms=max(
                     self.config.request_timeout_ms,
                     EMPLOYEE_SEARCH_TIMEOUT_MS,
                 ),
