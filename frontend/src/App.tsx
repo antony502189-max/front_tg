@@ -10,11 +10,13 @@ import {
   Routes,
   useLocation,
 } from 'react-router-dom'
+import { useShallow } from 'zustand/react/shallow'
 import { useTelegramTheme } from './hooks/useTelegramTheme'
-import { fetchUserProfile } from './api/profile'
-import { resolveSessionUserId } from './telegram/session'
+import { fetchUserProfile, saveUserProfile } from './api/profile'
+import { resolveSessionContext } from './telegram/session'
 import { useUserStore } from './store/userStore'
 import { MainLayout } from './layouts/MainLayout'
+import type { UserProfile } from './types/user'
 
 const OnboardingPage = lazy(() =>
   import('./pages/OnboardingPage').then((module) => ({
@@ -50,6 +52,76 @@ const SettingsPage = lazy(() =>
 const RouteFallback = () => (
   <div className="app-route-fallback" aria-hidden="true" />
 )
+
+type FallbackProfileState = {
+  role: UserProfile['role'] | null
+  subgroup: UserProfile['subgroup']
+  groupNumber: string
+  studentCardNumber: string
+  iisLogin: string
+  employeeId: string
+  urlId: string
+  fullName: string
+  position: string
+  department: string
+  avatarUrl: string
+  isOnboarded: boolean
+}
+
+const buildFallbackProfilePayload = (
+  sessionUserId: string,
+  previousSessionUserId: string | null,
+  state: FallbackProfileState,
+): UserProfile | null => {
+  if (!state.isOnboarded || !state.role) {
+    return null
+  }
+
+  const normalizedPreviousSessionUserId =
+    previousSessionUserId?.trim() || undefined
+
+  if (state.role === 'student') {
+    const groupNumber = state.groupNumber.trim()
+    const iisLogin = state.iisLogin.trim()
+    const studentCardNumber =
+      state.studentCardNumber.trim() || iisLogin
+
+    if (!groupNumber || !studentCardNumber) {
+      return null
+    }
+
+    return {
+      telegramUserId: sessionUserId,
+      previousTelegramUserId: normalizedPreviousSessionUserId,
+      role: 'student',
+      subgroup: state.subgroup,
+      groupNumber,
+      studentCardNumber,
+      iisLogin: iisLogin || undefined,
+    }
+  }
+
+  const employeeId = state.employeeId.trim()
+  const urlId = state.urlId.trim()
+  const fullName = state.fullName.trim()
+
+  if (!employeeId || !urlId || !fullName) {
+    return null
+  }
+
+  return {
+    telegramUserId: sessionUserId,
+    previousTelegramUserId: normalizedPreviousSessionUserId,
+    role: 'teacher',
+    subgroup: state.subgroup,
+    employeeId,
+    urlId,
+    fullName,
+    position: state.position.trim() || undefined,
+    department: state.department.trim() || undefined,
+    avatarUrl: state.avatarUrl.trim() || undefined,
+  }
+}
 
 type RequireOnboardedProps = {
   children: ReactElement
@@ -102,15 +174,40 @@ const RequireStudent = ({ children }: RequireStudentProps) => {
 
 function App() {
   const theme = useTelegramTheme()
-  const isOnboarded = useUserStore((state) => state.isOnboarded)
-  const isProfileBootstrapped = useUserStore(
-    (state) => state.isProfileBootstrapped,
-  )
-  const applyUserProfile = useUserStore(
-    (state) => state.applyUserProfile,
-  )
-  const markProfileBootstrapped = useUserStore(
-    (state) => state.markProfileBootstrapped,
+  const {
+    role,
+    subgroup,
+    groupNumber,
+    studentCardNumber,
+    iisLogin,
+    employeeId,
+    urlId,
+    fullName,
+    position,
+    department,
+    avatarUrl,
+    isOnboarded,
+    isProfileBootstrapped,
+    applyUserProfile,
+    markProfileBootstrapped,
+  } = useUserStore(
+    useShallow((state) => ({
+      role: state.role,
+      subgroup: state.subgroup,
+      groupNumber: state.groupNumber,
+      studentCardNumber: state.studentCardNumber,
+      iisLogin: state.iisLogin,
+      employeeId: state.employeeId,
+      urlId: state.urlId,
+      fullName: state.fullName,
+      position: state.position,
+      department: state.department,
+      avatarUrl: state.avatarUrl,
+      isOnboarded: state.isOnboarded,
+      isProfileBootstrapped: state.isProfileBootstrapped,
+      applyUserProfile: state.applyUserProfile,
+      markProfileBootstrapped: state.markProfileBootstrapped,
+    })),
   )
 
   useEffect(() => {
@@ -137,10 +234,33 @@ function App() {
 
   useEffect(() => {
     const controller = new AbortController()
-    const sessionUserId = resolveSessionUserId()
+    const { sessionUserId, previousSessionUserId } =
+      resolveSessionContext()
+    const fallbackProfilePayload = buildFallbackProfilePayload(
+      sessionUserId,
+      previousSessionUserId,
+      {
+        role,
+        subgroup,
+        groupNumber,
+        studentCardNumber,
+        iisLogin,
+        employeeId,
+        urlId,
+        fullName,
+        position,
+        department,
+        avatarUrl,
+        isOnboarded,
+      },
+    )
 
-    void fetchUserProfile(sessionUserId, controller.signal)
-      .then((profile) => {
+    void (async () => {
+      try {
+        const profile = await fetchUserProfile(
+          sessionUserId,
+          controller.signal,
+        )
         if (controller.signal.aborted) {
           return
         }
@@ -150,18 +270,43 @@ function App() {
           return
         }
 
+        if (fallbackProfilePayload) {
+          const restoredProfile = await saveUserProfile(
+            fallbackProfilePayload,
+          )
+          if (!controller.signal.aborted) {
+            applyUserProfile(restoredProfile)
+          }
+          return
+        }
+
         markProfileBootstrapped()
-      })
-      .catch(() => {
+      } catch {
         if (!controller.signal.aborted) {
           markProfileBootstrapped()
         }
-      })
+      }
+    })()
 
     return () => {
       controller.abort()
     }
-  }, [applyUserProfile, markProfileBootstrapped])
+  }, [
+    applyUserProfile,
+    avatarUrl,
+    department,
+    employeeId,
+    fullName,
+    groupNumber,
+    iisLogin,
+    isOnboarded,
+    markProfileBootstrapped,
+    position,
+    role,
+    studentCardNumber,
+    subgroup,
+    urlId,
+  ])
 
   return (
     <div className="app-root">

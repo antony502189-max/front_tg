@@ -248,7 +248,12 @@ class UserProfileStore:
         except ProfileValidationError:
             return None
 
-    def upsert(self, profile: UserProfile) -> UserProfile:
+    def upsert(
+        self,
+        profile: UserProfile,
+        *,
+        previous_telegram_user_id: str | None = None,
+    ) -> UserProfile:
         with self.lock:
             payload = self._load_unlocked()
             existing_profile = None
@@ -259,20 +264,36 @@ class UserProfileStore:
                 except ProfileValidationError:
                     existing_profile = None
 
-            stored_profile = profile
+            previous_profile = None
+            normalized_previous_id = _as_string(previous_telegram_user_id)
             if (
-                existing_profile is not None
-                and existing_profile.role == "student"
+                normalized_previous_id is not None
+                and normalized_previous_id != profile.telegram_user_id
+            ):
+                previous_payload = payload.get(normalized_previous_id)
+                if isinstance(previous_payload, dict):
+                    try:
+                        previous_profile = UserProfile.from_mapping(
+                            previous_payload
+                        )
+                    except ProfileValidationError:
+                        previous_profile = None
+
+            stored_profile = profile
+            merge_source = existing_profile or previous_profile
+            if (
+                merge_source is not None
+                and merge_source.role == "student"
                 and profile.role == "student"
             ):
                 preserved_iis_login = (
-                    profile.iis_login or existing_profile.iis_login
+                    profile.iis_login or merge_source.iis_login
                 )
                 should_drop_saved_password = (
                     profile.iis_password is None
                     and profile.iis_login is not None
-                    and existing_profile.iis_login is not None
-                    and profile.iis_login != existing_profile.iis_login
+                    and merge_source.iis_login is not None
+                    and profile.iis_login != merge_source.iis_login
                 )
                 stored_profile = replace(
                     profile,
@@ -281,13 +302,18 @@ class UserProfileStore:
                         None
                         if should_drop_saved_password
                         else profile.iis_password
-                        or existing_profile.iis_password
+                        or merge_source.iis_password
                     ),
                 )
 
             payload[profile.telegram_user_id] = stored_profile.to_dict(
                 include_sensitive=True
             )
+            if (
+                normalized_previous_id is not None
+                and normalized_previous_id != profile.telegram_user_id
+            ):
+                payload.pop(normalized_previous_id, None)
             self._save_unlocked(payload)
 
         return stored_profile

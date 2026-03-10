@@ -108,6 +108,7 @@ RUSSIAN_WEEKDAY_TO_INDEX = {
 
 GRADES_SEARCH_TIMEOUT_MS = 4_000
 GRADES_RATING_LIST_TIMEOUT_MS = 60_000
+EMPLOYEE_SEARCH_TIMEOUT_MS = 4_000
 RATING_DIRECTORY_CACHE_TTL_MS = 3_600_000
 TIMEOUT_ERROR_MARKERS = (
     "timed out",
@@ -428,6 +429,22 @@ def normalize_lookup_value(value: Any) -> str:
     if value is None:
         return ""
     return "".join(str(value).split()).lower()
+
+
+def normalize_auditory_lookup_value(value: Any) -> str:
+    if value is None:
+        return ""
+
+    normalized = (
+        str(value)
+        .strip()
+        .lower()
+        .replace("ё", "е")
+        .replace("корпус", "к")
+    )
+    return "".join(
+        character for character in normalized if character.isalnum()
+    )
 
 
 def split_employee_name_parts(value: Any) -> list[str]:
@@ -1215,7 +1232,7 @@ def normalize_auditories_response(payload: Any, query: str) -> list[dict[str, An
     if not isinstance(items, list):
         return []
 
-    normalized_query = normalize_lookup_value(query)
+    normalized_query = normalize_auditory_lookup_value(query)
     ranked_result: list[tuple[bool, str, dict[str, Any]]] = []
 
     for item in items:
@@ -1245,7 +1262,7 @@ def normalize_auditories_response(payload: Any, query: str) -> list[dict[str, An
             continue
 
         full_name = " ".join(part for part in (name, building_name) if part)
-        search_blob = normalize_lookup_value(
+        search_blob = normalize_auditory_lookup_value(
             " ".join(
                 value
                 for value in (
@@ -1266,7 +1283,9 @@ def normalize_auditories_response(payload: Any, query: str) -> list[dict[str, An
 
         ranked_result.append(
             (
-                not normalize_lookup_value(full_name).startswith(normalized_query),
+                not normalize_auditory_lookup_value(full_name).startswith(
+                    normalized_query
+                ),
                 full_name,
                 {
                     "id": str(item.get("id", full_name)),
@@ -1301,6 +1320,27 @@ def extract_room_digits(value: str) -> str:
     return "".join(character for character in value if character.isdigit())
 
 
+def split_room_tokens(room_value: str | None) -> list[str]:
+    if room_value is None:
+        return []
+
+    return [
+        normalize_room_token(item)
+        for item in room_value.split(",")
+        if isinstance(item, str) and item.strip()
+    ]
+
+
+def build_room_digit_tokens(tokens: list[str]) -> tuple[str, ...]:
+    digit_tokens: list[str] = []
+    for token in tokens:
+        digits = extract_room_digits(token)
+        if digits:
+            digit_tokens.append(digits)
+
+    return tuple(dict.fromkeys(digit_tokens))
+
+
 def get_auditory_tokens(auditory: Mapping[str, Any]) -> list[str]:
     building_value = first_non_empty_string(auditory.get("building"))
     building_digits = ""
@@ -1329,18 +1369,26 @@ def get_auditory_tokens(auditory: Mapping[str, Any]) -> list[str]:
     return [normalize_room_token(token) for token in tokens if isinstance(token, str) and token]
 
 
-def lesson_matches_auditory(room_value: str | None, auditory_tokens: list[str]) -> bool:
-    if room_value is None:
-        return False
+@dataclass(frozen=True)
+class RoomUsageEntry:
+    key: str
+    start_at: datetime
+    end_at: datetime
+    lesson_payload: dict[str, Any]
+    room_tokens: tuple[str, ...]
+    room_digit_tokens: tuple[str, ...]
 
-    room_tokens = [
-        normalize_room_token(item)
-        for item in room_value.split(",")
-        if isinstance(item, str) and item.strip()
-    ]
-    auditory_digit_tokens = [
-        extract_room_digits(token) for token in auditory_tokens if extract_room_digits(token)
-    ]
+
+def lesson_matches_auditory(room_value: str | None, auditory_tokens: list[str]) -> bool:
+    room_tokens = split_room_tokens(room_value)
+    return room_tokens_match_auditory(room_tokens, auditory_tokens)
+
+
+def room_tokens_match_auditory(
+    room_tokens: list[str] | tuple[str, ...],
+    auditory_tokens: list[str],
+) -> bool:
+    auditory_digit_tokens = build_room_digit_tokens(auditory_tokens)
 
     for room_token in room_tokens:
         room_digits = extract_room_digits(room_token)
@@ -1384,6 +1432,132 @@ def build_date_time(date_key: str, time_value: str) -> datetime | None:
     )
 
 
+def build_room_lesson_payload(
+    lesson: Mapping[str, Any],
+    date_key: str,
+) -> dict[str, Any]:
+    return {
+        "subject": first_non_empty_field(lesson, "subject"),
+        "date": date_key,
+        "startTime": first_non_empty_field(lesson, "startTime"),
+        "endTime": first_non_empty_field(lesson, "endTime"),
+    }
+
+
+def build_room_usage_index(
+    schedule_payload: Mapping[str, Any] | Any,
+) -> tuple[dict[str, list[RoomUsageEntry]], dict[str, list[RoomUsageEntry]]]:
+    days = schedule_payload.get("days") if isinstance(schedule_payload, dict) else None
+    if not isinstance(days, list):
+        return {}, {}
+
+    entries_by_token: dict[str, list[RoomUsageEntry]] = {}
+    entries_by_digits: dict[str, list[RoomUsageEntry]] = {}
+
+    for day in days:
+        if not isinstance(day, dict):
+            continue
+
+        day_key = first_non_empty_field(day, "date")
+        lessons = day.get("lessons")
+        if day_key is None or not isinstance(lessons, list):
+            continue
+
+        for index, lesson in enumerate(lessons):
+            if not isinstance(lesson, dict):
+                continue
+
+            room_tokens = split_room_tokens(
+                first_non_empty_field(lesson, "room")
+            )
+            if not room_tokens:
+                continue
+
+            start_value = build_date_time(
+                day_key,
+                first_non_empty_field(lesson, "startTime") or "",
+            )
+            end_value = build_date_time(
+                day_key,
+                first_non_empty_field(lesson, "endTime") or "",
+            )
+            if start_value is None or end_value is None:
+                continue
+
+            room_digit_tokens = build_room_digit_tokens(room_tokens)
+            entry = RoomUsageEntry(
+                key=f"{day_key}:{index}:{','.join(room_tokens)}",
+                start_at=start_value,
+                end_at=end_value,
+                lesson_payload=build_room_lesson_payload(lesson, day_key),
+                room_tokens=tuple(room_tokens),
+                room_digit_tokens=room_digit_tokens,
+            )
+
+            for room_token in entry.room_tokens:
+                entries_by_token.setdefault(room_token, []).append(entry)
+            for digit_token in entry.room_digit_tokens:
+                entries_by_digits.setdefault(digit_token, []).append(entry)
+
+    return entries_by_token, entries_by_digits
+
+
+def get_auditory_room_usage_entries(
+    auditory: Mapping[str, Any],
+    entries_by_token: Mapping[str, list[RoomUsageEntry]],
+    entries_by_digits: Mapping[str, list[RoomUsageEntry]],
+) -> list[RoomUsageEntry]:
+    auditory_tokens = get_auditory_tokens(auditory)
+    auditory_digit_tokens = build_room_digit_tokens(auditory_tokens)
+    matched_entries: dict[str, RoomUsageEntry] = {}
+
+    for auditory_token in auditory_tokens:
+        for entry in entries_by_token.get(auditory_token, []):
+            matched_entries[entry.key] = entry
+
+    for digit_token in auditory_digit_tokens:
+        for entry in entries_by_digits.get(digit_token, []):
+            matched_entries[entry.key] = entry
+
+    result = list(matched_entries.values())
+    result.sort(key=lambda entry: (entry.start_at, entry.end_at, entry.key))
+    return result
+
+
+def resolve_auditory_schedule_status(
+    auditory: Mapping[str, Any],
+    entries_by_token: Mapping[str, list[RoomUsageEntry]],
+    entries_by_digits: Mapping[str, list[RoomUsageEntry]],
+    now_value: datetime,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    auditory_tokens = get_auditory_tokens(auditory)
+    candidate_entries = get_auditory_room_usage_entries(
+        auditory,
+        entries_by_token,
+        entries_by_digits,
+    )
+    current_lesson = None
+    next_lesson = None
+
+    for entry in candidate_entries:
+        if not room_tokens_match_auditory(
+            entry.room_tokens,
+            auditory_tokens,
+        ):
+            continue
+
+        if entry.start_at <= now_value <= entry.end_at:
+            if current_lesson is None:
+                current_lesson = entry.lesson_payload
+            continue
+
+        if now_value < entry.start_at:
+            next_lesson = entry.lesson_payload
+            break
+
+    return current_lesson, next_lesson
+
+
 def normalize_free_auditories_response(
     auditories_payload: Any,
     schedule_payload: Mapping[str, Any],
@@ -1391,82 +1565,35 @@ def normalize_free_auditories_response(
     now_value: datetime,
 ) -> dict[str, Any]:
     auditories = normalize_auditories_response(auditories_payload, query)
-    days = schedule_payload.get("days") if isinstance(schedule_payload, dict) else None
-    if not isinstance(days, list):
-        days = []
+    room_usage_entries_by_token, room_usage_entries_by_digits = (
+        build_room_usage_index(schedule_payload)
+    )
 
-    free_items = []
+    room_items = []
 
     for auditory in auditories:
         if not isinstance(auditory, dict):
             continue
 
-        auditory_tokens = get_auditory_tokens(auditory)
-        current_lesson = None
-        next_lesson = None
+        current_lesson, next_lesson = resolve_auditory_schedule_status(
+            auditory,
+            room_usage_entries_by_token,
+            room_usage_entries_by_digits,
+            now_value,
+        )
 
-        for day in days:
-            if not isinstance(day, dict):
-                continue
-
-            day_key = first_non_empty_field(day, "date")
-            lessons = day.get("lessons")
-            if day_key is None or not isinstance(lessons, list):
-                continue
-
-            for lesson in lessons:
-                if not isinstance(lesson, dict):
-                    continue
-                if not lesson_matches_auditory(
-                    first_non_empty_field(lesson, "room"),
-                    auditory_tokens,
-                ):
-                    continue
-
-                start_value = build_date_time(
-                    day_key,
-                    first_non_empty_field(lesson, "startTime") or "",
-                )
-                end_value = build_date_time(
-                    day_key,
-                    first_non_empty_field(lesson, "endTime") or "",
-                )
-                if start_value is None or end_value is None:
-                    continue
-
-                if start_value <= now_value <= end_value:
-                    current_lesson = {
-                        "subject": first_non_empty_field(lesson, "subject"),
-                        "date": day_key,
-                        "startTime": first_non_empty_field(lesson, "startTime"),
-                        "endTime": first_non_empty_field(lesson, "endTime"),
-                    }
-                    break
-
-                if now_value < start_value and next_lesson is None:
-                    next_lesson = {
-                        "subject": first_non_empty_field(lesson, "subject"),
-                        "date": day_key,
-                        "startTime": first_non_empty_field(lesson, "startTime"),
-                        "endTime": first_non_empty_field(lesson, "endTime"),
-                    }
-
-            if current_lesson is not None:
-                break
-
-        if current_lesson is not None:
-            continue
-
-        free_items.append(
+        room_items.append(
             {
                 **auditory,
+                "isBusy": current_lesson is not None,
+                "currentLesson": current_lesson,
                 "nextBusyLesson": next_lesson,
             }
         )
 
     return {
         "generatedAt": now_value.isoformat(),
-        "items": free_items,
+        "items": room_items,
     }
 
 
@@ -2437,9 +2564,14 @@ class BackendApp:
         search_candidates = build_employee_search_candidates(query_value)
 
         for index, candidate in enumerate(search_candidates):
-            employees_payload = self.request_upstream(
+            employees_payload = self.request_upstream_with_timeout(
                 "/employees/fio",
                 {"employee-fio": candidate},
+                timeout_ms=min(
+                    self.config.request_timeout_ms,
+                    EMPLOYEE_SEARCH_TIMEOUT_MS,
+                ),
+                max_retries=0,
             )
             normalized_payload = normalize_employees_response(
                 employees_payload,
@@ -2718,11 +2850,24 @@ class BackendApp:
         if method in {"PUT", "POST"}:
             try:
                 payload = parse_json_request_body(body)
+                previous_telegram_user_id = payload.get(
+                    "previousTelegramUserId"
+                )
+                if previous_telegram_user_id is not None:
+                    previous_telegram_user_id = (
+                        str(previous_telegram_user_id).strip() or None
+                    )
                 profile = UserProfile.from_payload(payload)
             except ProfileValidationError as error:
                 return Response(400, {"error": error.message})
 
-            return Response(200, self.profile_store.upsert(profile).to_dict())
+            return Response(
+                200,
+                self.profile_store.upsert(
+                    profile,
+                    previous_telegram_user_id=previous_telegram_user_id,
+                ).to_dict(),
+            )
 
         if method == "DELETE":
             telegram_user_id = first_query_value(parsed_url, "telegramUserId")

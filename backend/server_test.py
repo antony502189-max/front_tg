@@ -956,6 +956,26 @@ class BackendServerTests(unittest.TestCase):
         self.assertEqual(normalized[0]["department"], "Каф.ИИС")
         self.assertEqual(normalized[0]["capacity"], 24)
 
+    def test_normalize_auditories_response_matches_building_alias_queries(self) -> None:
+        payload = [
+            {
+                "id": 214,
+                "name": "303",
+                "buildingNumber": {"name": "5 к."},
+            },
+            {
+                "id": 215,
+                "name": "101",
+                "buildingNumber": {"name": "1 к."},
+            },
+        ]
+
+        normalized = normalize_auditories_response(payload, "5 корпус")
+
+        self.assertEqual(len(normalized), 1)
+        self.assertEqual(normalized[0]["name"], "303")
+        self.assertEqual(normalized[0]["building"], "5 к.")
+
     def test_auditories_route_returns_filtered_list(self) -> None:
         def fetcher(path: str, _params: dict[str, str]):
             if path == "/auditories":
@@ -1918,6 +1938,44 @@ class BackendServerTests(unittest.TestCase):
         self.assertEqual(response.payload[0]["employeeId"], "15")
         self.assertEqual(response.payload[0]["urlId"], "petrov-p-p")
 
+    def test_employee_search_uses_fast_timeout_without_retries(self) -> None:
+        captured_calls: list[tuple[str, dict[str, str], int, int]] = []
+
+        class FastSearchApp(BackendApp):
+            def request_upstream_with_timeout(
+                self,
+                path: str,
+                params: dict[str, str],
+                *,
+                timeout_ms: int,
+                max_retries: int,
+            ):
+                captured_calls.append(
+                    (path, params, timeout_ms, max_retries)
+                )
+                return {"value": []}
+
+        app = FastSearchApp(config=TEST_CONFIG, fetcher=lambda *_: {})
+
+        response = app.handle_request(
+            "GET",
+            "/api/search-employee?query=Пе",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.payload, [])
+        self.assertEqual(
+            captured_calls,
+            [
+                (
+                    "/employees/fio",
+                    {"employee-fio": "Пе"},
+                    TEST_CONFIG["request_timeout_ms"],
+                    0,
+                )
+            ],
+        )
+
     def test_employee_search_falls_back_for_initials_with_punctuation(self) -> None:
         seen_queries: list[str] = []
 
@@ -2244,6 +2302,63 @@ class BackendServerTests(unittest.TestCase):
         finally:
             store_path.unlink(missing_ok=True)
 
+    def test_profile_route_moves_student_profile_from_previous_telegram_id(self) -> None:
+        store_path = Path("backend") / "_profile_store_previous_id_test.json"
+        store_path.unlink(missing_ok=True)
+        try:
+            app = BackendApp(
+                config=TEST_CONFIG,
+                fetcher=lambda *_: {},
+                profile_store=UserProfileStore(store_path),
+            )
+            app.handle_request(
+                "PUT",
+                "/api/profile",
+                body=json.dumps(
+                    {
+                        "telegramUserId": "local:legacy",
+                        "role": "student",
+                        "groupNumber": "568403",
+                        "studentCardNumber": "56841017",
+                        "iisLogin": "56841017",
+                        "iisPassword": "secret",
+                    }
+                ).encode("utf-8"),
+            )
+            migrated = app.handle_request(
+                "PUT",
+                "/api/profile",
+                body=json.dumps(
+                    {
+                        "telegramUserId": "tg:80",
+                        "previousTelegramUserId": "local:legacy",
+                        "role": "student",
+                        "groupNumber": "568403",
+                        "iisLogin": "56841017",
+                    }
+                ).encode("utf-8"),
+            )
+            old_profile = app.handle_request(
+                "GET",
+                "/api/profile?telegramUserId=local:legacy",
+            )
+            new_profile = app.handle_request(
+                "GET",
+                "/api/profile?telegramUserId=tg:80",
+            )
+            stored = app.profile_store.get("tg:80")
+
+            self.assertEqual(migrated.status_code, 200)
+            self.assertEqual(migrated.payload["telegramUserId"], "tg:80")
+            self.assertTrue(migrated.payload["hasIisPassword"])
+            self.assertEqual(old_profile.status_code, 404)
+            self.assertEqual(new_profile.status_code, 200)
+            self.assertTrue(new_profile.payload["hasIisPassword"])
+            self.assertIsNotNone(stored)
+            self.assertEqual(stored.iis_password, "secret")
+        finally:
+            store_path.unlink(missing_ok=True)
+
     def test_normalize_omissions_response_sums_month_counts(self) -> None:
         normalized = normalize_omissions_response(
             [
@@ -2461,7 +2576,7 @@ class BackendServerTests(unittest.TestCase):
         finally:
             store_path.unlink(missing_ok=True)
 
-    def test_free_auditories_route_filters_busy_room(self) -> None:
+    def test_free_auditories_route_returns_room_statuses(self) -> None:
         now_value = datetime(2026, 3, 2, 10, 10)
 
         def fetcher(path: str, _params: dict[str, str]):
@@ -2475,6 +2590,13 @@ class BackendServerTests(unittest.TestCase):
                                 "endLessonTime": "11:30",
                                 "lessonTypeAbbrev": "\u041b\u0420",
                                 "auditories": ["303-3\u043a"],
+                            },
+                            {
+                                "subjectFullName": "Math",
+                                "startLessonTime": "12:00",
+                                "endLessonTime": "13:20",
+                                "lessonTypeAbbrev": "\u041b\u041a",
+                                "auditories": ["101-1\u043a"],
                             }
                         ]
                     }
@@ -2510,8 +2632,32 @@ class BackendServerTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.payload["items"]), 1)
-        self.assertEqual(response.payload["items"][0]["name"], "101")
+        self.assertEqual(len(response.payload["items"]), 2)
+        items_by_name = {
+            item["name"]: item for item in response.payload["items"]
+        }
+        self.assertEqual(set(items_by_name), {"101", "303"})
+        self.assertTrue(items_by_name["303"]["isBusy"])
+        self.assertEqual(
+            items_by_name["303"]["currentLesson"],
+            {
+                "subject": "Physics",
+                "date": "2026-03-02",
+                "startTime": "10:05",
+                "endTime": "11:30",
+            },
+        )
+        self.assertFalse(items_by_name["101"]["isBusy"])
+        self.assertIsNone(items_by_name["101"]["currentLesson"])
+        self.assertEqual(
+            items_by_name["101"]["nextBusyLesson"],
+            {
+                "subject": "Math",
+                "date": "2026-03-02",
+                "startTime": "12:00",
+                "endTime": "13:20",
+            },
+        )
 
 
 if __name__ == "__main__":

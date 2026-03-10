@@ -112,8 +112,13 @@ type RetriableRequestConfig = InternalAxiosRequestConfig & {
   retryCount?: number
 }
 
+type RetriableAxiosRequestConfig = AxiosRequestConfig & {
+  retryCount?: number
+}
+
 type ApiGetOptions = Omit<AxiosRequestConfig, 'url' | 'method'> & {
   cacheTtlMs?: number
+  retry?: 'default' | 'none'
 }
 
 export const apiClient = axios.create({
@@ -240,6 +245,7 @@ export const apiGet = async <T>(
   url: string,
   {
     cacheTtlMs = 0,
+    retry = 'default',
     params,
     ...config
   }: ApiGetOptions = {},
@@ -262,11 +268,17 @@ export const apiGet = async <T>(
     }
   }
 
+  const requestConfig: RetriableAxiosRequestConfig = {
+    ...config,
+    params,
+  }
+
+  if (retry === 'none') {
+    requestConfig.retryCount = MAX_API_RETRIES
+  }
+
   const request = apiClient
-    .get<T>(url, {
-      ...config,
-      params,
-    })
+    .get<T>(url, requestConfig)
     .then((response) => {
       if (cacheKey && cacheTtlMs > 0) {
         responseCache.set(cacheKey, {

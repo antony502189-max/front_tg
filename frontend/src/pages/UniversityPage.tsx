@@ -1,6 +1,5 @@
 import {
   startTransition,
-  useDeferredValue,
   useState,
 } from 'react'
 import { Search } from 'lucide-react'
@@ -37,7 +36,7 @@ const SEARCH_MODE_CONFIG: Record<
   },
   freeRooms: {
     placeholder: 'Например, 303, 5к или лаборатория',
-    hint: 'Введите 1 символ. Можно искать аудитории, которые сейчас свободны.',
+    hint: 'Введите 1 символ. Можно искать аудитории и сразу видеть, свободны они сейчас или заняты.',
     minimumLength: 1,
   },
 }
@@ -60,8 +59,7 @@ export const UniversityPage = () => {
   const [mode, setMode] = useState<SearchMode>('teachers')
   const [query, setQuery] = useState('')
 
-  const deferredQuery = useDeferredValue(query)
-  const debouncedQuery = useDebouncedValue(deferredQuery.trim(), 350)
+  const debouncedQuery = useDebouncedValue(query.trim(), 180)
   const searchConfig = SEARCH_MODE_CONFIG[mode]
 
   const normalizedGroupNumber = groupNumber.trim()
@@ -122,7 +120,7 @@ export const UniversityPage = () => {
     getErrorMessage: (requestError) =>
       getApiErrorMessage(
         requestError,
-        'Не удалось загрузить свободные аудитории. Попробуйте ещё раз.',
+        'Не удалось загрузить аудитории. Попробуйте ещё раз.',
       ),
   })
 
@@ -142,8 +140,8 @@ export const UniversityPage = () => {
             <h1 className="planner-title">ВУЗ</h1>
             <p className="planner-subtitle">
               {role === 'teacher'
-                ? 'Ищите преподавателей и свободные аудитории по данным из вашего профиля.'
-                : 'Ищите преподавателей и свободные аудитории по номеру вашей группы.'}
+                ? 'Ищите преподавателей и аудитории по данным из вашего профиля.'
+                : 'Ищите преподавателей и аудитории по номеру вашей группы.'}
             </p>
           </div>
 
@@ -193,7 +191,7 @@ export const UniversityPage = () => {
               })
             }}
           >
-            Свободные аудитории
+            Аудитории
           </button>
         </div>
 

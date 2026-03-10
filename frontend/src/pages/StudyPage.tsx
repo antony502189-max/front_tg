@@ -112,6 +112,30 @@ const getMarkTone = (value: number) => {
   return 'danger'
 }
 
+const getAverageTone = (value: number | null) => {
+  if (value === null) {
+    return 'neutral'
+  }
+
+  return getMarkTone(value)
+}
+
+const getOmissionTone = (value: number | undefined) => {
+  if (value === undefined) {
+    return 'neutral'
+  }
+
+  if (value === 0) {
+    return 'success'
+  }
+
+  if (value <= 3) {
+    return 'warning'
+  }
+
+  return 'danger'
+}
+
 const StudyMetricValue = ({
   isLoading,
   value,
@@ -569,99 +593,169 @@ export const StudyPage = () => {
             )}
 
             <section className="study-subjects-section">
-              <h2 className="study-section-title">Оценки по предметам</h2>
+              <div className="study-subjects-heading">
+                <h2 className="study-section-title">
+                  Оценки и пропуски по предметам
+                </h2>
+                <p className="study-subjects-caption">
+                  В одной строке собраны средний балл, часы пропусков и
+                  все оценки по дисциплине.
+                </p>
+              </div>
 
               {subjectSummaries.length > 0 ? (
-                <div className="study-subject-list">
+                <div className="study-subjects-table-card">
+                  <div
+                    className="study-subjects-table-head"
+                    aria-hidden="true"
+                  >
+                    <span className="study-subjects-table-head-label">
+                      Предмет
+                    </span>
+                    <span className="study-subjects-table-head-label">
+                      Преподаватель
+                    </span>
+                    <span className="study-subjects-table-head-label">
+                      Средний
+                    </span>
+                    <span className="study-subjects-table-head-label">
+                      Пропуски
+                    </span>
+                    <span className="study-subjects-table-head-label">
+                      Оценки
+                    </span>
+                  </div>
+
+                  <div className="study-subjects-table-body">
                   {subjectSummaries.map((subject) => {
                     const subjectOmissionCount = resolveSubjectOmissionCount(
                       subject.subject,
                       omissionSubjectLookup,
                     )
+                    const omissionTone = getOmissionTone(
+                      subjectOmissionCount,
+                    )
+                    const averageTone = getAverageTone(subject.average)
 
                     return (
                       <article
                         key={subject.id}
-                        className="study-subject-card"
+                        className="study-subject-row"
                       >
-                        <header className="study-subject-header">
-                          <div>
-                            <h3 className="study-subject-title">
-                              {subject.subject}
-                            </h3>
-                            {subject.teacher && (
-                              <p className="study-subject-teacher">
-                                {subject.teacher}
-                              </p>
-                            )}
-                          </div>
+                        <div
+                          className="study-subject-cell study-subject-cell--subject"
+                          data-label="Предмет"
+                        >
+                          <h3 className="study-subject-row-title">
+                            {subject.subject}
+                          </h3>
+                        </div>
 
-                          <div className="study-subject-metrics">
-                            <div className="study-subject-summary">
-                              <span className="study-subject-summary-label">
-                                Средний
-                              </span>
-                              <strong className="study-subject-summary-value">
-                                {subject.average?.toFixed(1) ?? '?'}
-                              </strong>
-                            </div>
-                            <div className="study-subject-summary study-subject-summary--omissions">
-                              <span className="study-subject-summary-label">
-                                Пропуски
-                              </span>
-                              <strong className="study-subject-summary-value">
-                                {subjectOmissionCount === undefined
-                                  ? '—'
-                                  : `${subjectOmissionCount} ч.`}
-                              </strong>
-                            </div>
-                          </div>
-                        </header>
+                        <div
+                          className="study-subject-cell study-subject-cell--teacher"
+                          data-label="Преподаватель"
+                        >
+                          <p
+                            className={`study-subject-row-teacher${
+                              subject.teacher
+                                ? ''
+                                : ' study-subject-row-teacher--muted'
+                            }`}
+                          >
+                            {subject.teacher ?? 'Не указан'}
+                          </p>
+                        </div>
 
-                        {subject.marks.length > 0 ? (
-                          subject.hasTypedMarks ? (
-                            <div className="study-mark-groups">
-                              {subject.markGroups.map((group) => (
-                                <div
-                                  key={`${subject.id}:${group.key}`}
-                                  className="study-mark-group"
-                                >
-                                  <span className="study-mark-group-label">
-                                    {group.label}
-                                  </span>
-                                  <div className="study-marks-row">
-                                    {group.marks.map((mark, index) => (
-                                      <span
-                                        key={`${subject.id}:${group.key}:${index}:${mark.value}`}
-                                        className={`study-mark-badge study-mark-badge--${getMarkTone(mark.value)}`}
-                                      >
-                                        {mark.value}
-                                      </span>
-                                    ))}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="study-marks-row">
-                              {subject.marks.map((mark, index) => (
-                                <span
-                                  key={`${subject.id}:${index}:${mark.value}`}
-                                  className={`study-mark-badge study-mark-badge--${getMarkTone(mark.value)}`}
-                                >
-                                  {mark.value}
-                                </span>
-                              ))}
-                            </div>
-                          )
-                        ) : (
-                          <span className="study-no-marks">
-                            Оценок пока нет
+                        <div
+                          className="study-subject-cell study-subject-cell--metric"
+                          data-label="Средний"
+                        >
+                          <div
+                            className={`study-subject-stat study-subject-stat--${averageTone}`}
+                          >
+                            <strong className="study-subject-stat-value">
+                              {subject.average?.toFixed(1) ?? '—'}
+                            </strong>
+                          </div>
+                          <span className="study-subject-stat-note">
+                            {subject.marksCount > 0
+                              ? `${subject.marksCount} ${formatMarksLabel(subject.marksCount)}`
+                              : 'Оценок пока нет'}
                           </span>
-                        )}
+                        </div>
+
+                        <div
+                          className="study-subject-cell study-subject-cell--metric"
+                          data-label="Пропуски"
+                        >
+                          <div
+                            className={`study-subject-stat study-subject-stat--${omissionTone}`}
+                          >
+                            <strong className="study-subject-stat-value">
+                              {subjectOmissionCount === undefined
+                                ? '—'
+                                : `${subjectOmissionCount} ч.`}
+                            </strong>
+                          </div>
+                          <span className="study-subject-stat-note">
+                            {subjectOmissionCount === undefined
+                              ? 'Нет данных из IIS'
+                              : subjectOmissionCount === 0
+                                ? 'Без пропусков'
+                                : 'Неуважительные часы'}
+                          </span>
+                        </div>
+
+                        <div
+                          className="study-subject-cell study-subject-cell--marks"
+                          data-label="Оценки"
+                        >
+                          {subject.marks.length > 0 ? (
+                            subject.hasTypedMarks ? (
+                              <div className="study-mark-groups">
+                                {subject.markGroups.map((group) => (
+                                  <div
+                                    key={`${subject.id}:${group.key}`}
+                                    className="study-mark-group"
+                                  >
+                                    <span className="study-mark-group-label">
+                                      {group.label}
+                                    </span>
+                                    <div className="study-marks-row">
+                                      {group.marks.map((mark, index) => (
+                                        <span
+                                          key={`${subject.id}:${group.key}:${index}:${mark.value}`}
+                                          className={`study-mark-badge study-mark-badge--${getMarkTone(mark.value)}`}
+                                        >
+                                          {mark.value}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="study-marks-row">
+                                {subject.marks.map((mark, index) => (
+                                  <span
+                                    key={`${subject.id}:${index}:${mark.value}`}
+                                    className={`study-mark-badge study-mark-badge--${getMarkTone(mark.value)}`}
+                                  >
+                                    {mark.value}
+                                  </span>
+                                ))}
+                              </div>
+                            )
+                          ) : (
+                            <span className="study-no-marks">
+                              Оценок пока нет
+                            </span>
+                          )}
+                        </div>
                       </article>
                     )
                   })}
+                  </div>
                 </div>
               ) : (
                 <div className="study-empty-card">

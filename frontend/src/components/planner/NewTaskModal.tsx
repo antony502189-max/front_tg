@@ -86,7 +86,7 @@ export const NewTaskModal = ({ isOpen, onClose }: NewTaskModalProps) => {
             <input
               className="planner-modal-input"
               type="text"
-              placeholder="Например, подготовиться к коллокуиму"
+              placeholder="Например, подготовиться к коллоквиуму"
               value={title}
               onChange={(event) => setTitle(event.target.value)}
             />

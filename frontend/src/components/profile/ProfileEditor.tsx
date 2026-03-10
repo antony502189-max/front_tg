@@ -1,5 +1,4 @@
 ﻿import {
-  useDeferredValue,
   useEffect,
   useState,
   type FormEvent,
@@ -188,12 +187,9 @@ export const ProfileEditor = ({
   const selectedTeacherQuery = selectedTeacher
     ? normalizeTeacherQuery(selectedTeacher.fullName)
     : ''
-  const deferredTeacherQuery = useDeferredValue(
-    normalizedTeacherQuery,
-  )
   const debouncedTeacherQuery = useDebouncedValue(
-    deferredTeacherQuery,
-    300,
+    normalizedTeacherQuery,
+    180,
   )
   const hasDebouncedTeacherQuery =
     role === 'teacher' && debouncedTeacherQuery.length >= 2

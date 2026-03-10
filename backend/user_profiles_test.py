@@ -4,7 +4,7 @@ import time
 import unittest
 from pathlib import Path
 
-from backend.user_profiles import UserProfileStore
+from backend.user_profiles import UserProfile, UserProfileStore
 
 
 def build_student_payload(group_number: str) -> dict[str, dict[str, str]]:
@@ -72,6 +72,48 @@ class UserProfileStoreTests(unittest.TestCase):
             self.assertEqual(first.group_number, "568403")
             self.assertIsNotNone(second)
             self.assertEqual(second.group_number, "568404")
+        finally:
+            store_path.unlink(missing_ok=True)
+
+    def test_upsert_moves_profile_from_previous_id_and_preserves_password(self) -> None:
+        store_path = Path("backend") / "_profile_store_move_test.json"
+        store_path.unlink(missing_ok=True)
+
+        try:
+            store = UserProfileStore(store_path)
+            store.upsert(
+                UserProfile.from_mapping(
+                    {
+                        "telegramUserId": "local:legacy",
+                        "role": "student",
+                        "groupNumber": "568403",
+                        "studentCardNumber": "56841017",
+                        "iisLogin": "56841017",
+                        "iisPassword": "secret",
+                    }
+                )
+            )
+
+            moved_profile = store.upsert(
+                UserProfile.from_mapping(
+                    {
+                        "telegramUserId": "tg:1",
+                        "role": "student",
+                        "groupNumber": "568403",
+                        "studentCardNumber": "56841017",
+                        "iisLogin": "56841017",
+                    }
+                ),
+                previous_telegram_user_id="local:legacy",
+            )
+
+            self.assertEqual(moved_profile.telegram_user_id, "tg:1")
+            self.assertEqual(moved_profile.iis_login, "56841017")
+            self.assertEqual(moved_profile.iis_password, "secret")
+            self.assertIsNone(store.get("local:legacy"))
+            stored = store.get("tg:1")
+            self.assertIsNotNone(stored)
+            self.assertEqual(stored.iis_password, "secret")
         finally:
             store_path.unlink(missing_ok=True)
 

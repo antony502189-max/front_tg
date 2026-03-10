@@ -3,6 +3,7 @@ export type Subgroup = 'all' | '1' | '2'
 
 export type UserProfile = {
   telegramUserId?: string
+  previousTelegramUserId?: string
   role: UserRole
   subgroup?: Subgroup
   groupNumber?: string
@@ -46,5 +47,7 @@ export type FreeAuditory = {
   capacity?: number | null
   department?: string
   note?: string
+  isBusy?: boolean
+  currentLesson?: FreeAuditoryNextLesson | null
   nextBusyLesson?: FreeAuditoryNextLesson | null
 }

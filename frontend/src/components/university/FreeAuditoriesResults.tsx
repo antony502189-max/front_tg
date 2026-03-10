@@ -44,7 +44,7 @@ const formatNextBusyLabel = (
   nextBusyLesson: FreeAuditory['nextBusyLesson'],
 ) => {
   if (!nextBusyLesson?.date || !nextBusyLesson.startTime) {
-    return 'О следующей паре данных нет или аудитория свободна.'
+    return 'В ближайшем расписании занятий для этой аудитории ничего не найдено.'
   }
 
   const parsedDate = parseDateKey(nextBusyLesson.date)
@@ -59,6 +59,25 @@ const formatNextBusyLabel = (
   return `${subjectLabel}${dateLabel}, ${nextBusyLesson.startTime}-${nextBusyLesson.endTime ?? '?'}`
 }
 
+const formatCurrentLessonLabel = (
+  currentLesson: FreeAuditory['currentLesson'],
+) => {
+  if (!currentLesson?.date || !currentLesson.startTime) {
+    return 'Сейчас по расписанию занятий в этой аудитории нет.'
+  }
+
+  const parsedDate = parseDateKey(currentLesson.date)
+  const dateLabel = parsedDate
+    ? dateFormatter.format(parsedDate)
+    : currentLesson.date
+
+  const subjectLabel = currentLesson.subject
+    ? `${currentLesson.subject}. `
+    : ''
+
+  return `${subjectLabel}${dateLabel}, ${currentLesson.startTime}-${currentLesson.endTime ?? '?'}`
+}
+
 export const FreeAuditoriesResults = ({
   hasProfileIdentity,
   hasQuery,
@@ -70,12 +89,12 @@ export const FreeAuditoriesResults = ({
 }: FreeAuditoriesResultsProps) => {
   if (!hasProfileIdentity) {
     return (
-      <UniversityTextCard
-        className="univer-helper-card"
-        title="Нужны данные из профиля"
-        subtitle="Для проверки свободных аудиторий добавьте группу или данные преподавателя."
-      />
-    )
+        <UniversityTextCard
+          className="univer-helper-card"
+          title="Нужны данные из профиля"
+          subtitle="Для проверки статуса аудиторий добавьте группу или данные преподавателя."
+        />
+      )
   }
 
   if (!hasQuery) {
@@ -106,8 +125,8 @@ export const FreeAuditoriesResults = ({
     return (
       <UniversityTextCard
         className="univer-empty-card"
-        title="Свободные аудитории не найдены"
-        subtitle="Попробуйте изменить запрос. Иногда одна буква в названии меняет результат."
+        title="Аудитории не найдены"
+        subtitle="Попробуйте изменить запрос. Можно искать по номеру, корпусу или части названия."
       />
     )
   }
@@ -134,7 +153,13 @@ export const FreeAuditoriesResults = ({
                 </p>
               </div>
 
-              <span className="free-room-status">Сейчас свободна</span>
+              <span
+                className={`free-room-status${
+                  room.isBusy ? ' free-room-status--busy' : ''
+                }`}
+              >
+                {room.isBusy ? 'Сейчас занята' : 'Сейчас свободна'}
+              </span>
             </div>
 
             <div className="free-room-tags">
@@ -151,12 +176,25 @@ export const FreeAuditoriesResults = ({
 
             {room.note && <p className="free-room-note">{room.note}</p>}
 
-            <div className="free-room-next">
-              <span className="free-room-next-label">Следующее занятие</span>
-              <strong className="free-room-next-value">
-                {formatNextBusyLabel(room.nextBusyLesson)}
-              </strong>
-            </div>
+            {room.isBusy ? (
+              <div className="free-room-next">
+                <span className="free-room-next-label">
+                  Текущее занятие
+                </span>
+                <strong className="free-room-next-value">
+                  {formatCurrentLessonLabel(room.currentLesson)}
+                </strong>
+              </div>
+            ) : (
+              <div className="free-room-next">
+                <span className="free-room-next-label">
+                  Следующее занятие
+                </span>
+                <strong className="free-room-next-value">
+                  {formatNextBusyLabel(room.nextBusyLesson)}
+                </strong>
+              </div>
+            )}
           </article>
         ))}
       </div>
