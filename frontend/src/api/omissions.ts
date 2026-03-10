@@ -5,9 +5,15 @@ export type OmissionMonth = {
   omissionCount: number
 }
 
+export type OmissionSubject = {
+  subject: string
+  omissionCount: number
+}
+
 export type OmissionsResponse = {
   totalHours: number
   months: OmissionMonth[]
+  subjects: OmissionSubject[]
 }
 
 const OMISSIONS_API_TIMEOUT_MS = LONG_API_TIMEOUT_MS * 2
@@ -60,8 +66,27 @@ export async function fetchOmissions(
         .filter((item) => item.month.length > 0)
     : []
 
+  const subjects = Array.isArray(payload.subjects)
+    ? payload.subjects
+        .filter((item) => !!item && typeof item === 'object')
+        .map((item) => {
+          const record = item as Record<string, unknown>
+          const subject =
+            typeof record.subject === 'string'
+              ? record.subject.trim()
+              : ''
+
+          return {
+            subject,
+            omissionCount: toNumber(record.omissionCount),
+          }
+        })
+        .filter((item) => item.subject.length > 0)
+    : []
+
   return {
     totalHours: toNumber(payload.totalHours),
     months,
+    subjects,
   }
 }

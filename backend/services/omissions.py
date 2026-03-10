@@ -60,6 +60,29 @@ class OmissionsService:
         username: str,
         password: str,
     ) -> JsonValue:
+        return self._run_with_retries(
+            username,
+            password,
+            self._fetch_month_student_omission_counts,
+        )
+
+    def fetch_student_omissions_overview(
+        self,
+        username: str,
+        password: str,
+    ) -> JsonValue:
+        return self._run_with_retries(
+            username,
+            password,
+            self._fetch_student_omissions_overview,
+        )
+
+    def _run_with_retries(
+        self,
+        username: str,
+        password: str,
+        loader: Callable[[str, str], JsonValue],
+    ) -> JsonValue:
         normalized_username = str(username).strip()
         normalized_password = str(password)
 
@@ -73,10 +96,7 @@ class OmissionsService:
 
         for attempt in range(self.max_retries + 1):
             try:
-                return self._fetch_month_student_omission_counts(
-                    normalized_username,
-                    normalized_password,
-                )
+                return loader(normalized_username, normalized_password)
             except Exception as error:
                 last_error = error
                 status = getattr(error, "status", None)
@@ -86,15 +106,13 @@ class OmissionsService:
 
                 time.sleep(self.retry_delay_ms * (attempt + 1) / 1000)
 
-        raise last_error or self.upstream_error_cls(
-            "Upstream API request failed"
-        )
+        raise last_error or self.upstream_error_cls("Upstream API request failed")
 
-    def _fetch_month_student_omission_counts(
+    def _create_authenticated_opener(
         self,
         username: str,
         password: str,
-    ) -> JsonValue:
+    ) -> Any:
         cookie_jar = CookieJar()
         opener = build_opener(HTTPCookieProcessor(cookie_jar))
 
@@ -109,10 +127,40 @@ class OmissionsService:
             },
         )
 
+        return opener
+
+    def _fetch_month_student_omission_counts(
+        self,
+        username: str,
+        password: str,
+    ) -> JsonValue:
+        opener = self._create_authenticated_opener(username, password)
         return self._request_json(
             opener,
             "/omission-count-by-student-for-semester",
         )
+
+    def _fetch_student_omissions_overview(
+        self,
+        username: str,
+        password: str,
+    ) -> JsonValue:
+        opener = self._create_authenticated_opener(username, password)
+        omission_counts = self._request_json(
+            opener,
+            "/omission-count-by-student-for-semester",
+        )
+
+        grade_book = None
+        try:
+            grade_book = self._request_json(opener, "/grade-book")
+        except Exception:
+            grade_book = None
+
+        return {
+            "monthStudentOmissionCounts": omission_counts,
+            "gradeBook": grade_book,
+        }
 
     def _request_json(
         self,

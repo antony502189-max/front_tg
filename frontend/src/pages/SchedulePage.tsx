@@ -438,6 +438,21 @@ export const SchedulePage = () => {
           referenceDate,
         ].join(':')
       : null
+  const persistentScheduleCacheKey =
+    effectiveRole && hasIdentity
+      ? [
+          'schedule',
+          effectiveRole,
+          effectiveRole === 'teacher'
+            ? activeTeacherUrlId
+            : normalizedGroupNumber,
+          activeTeacherEmployeeId || 'no-employee-id',
+          effectiveSubgroup,
+          selectedWeek ?? 'auto',
+          resolvedView,
+          resolvedView === 'day' ? referenceDate : 'latest',
+        ].join(':')
+      : null
 
   const loadSchedule = useCallback(
     (signal: AbortSignal) => {
@@ -492,6 +507,10 @@ export const SchedulePage = () => {
     initialData: null,
     load: loadSchedule,
     keepPreviousData: true,
+    persistentCache: {
+      key: persistentScheduleCacheKey,
+      maxAgeMs: 14 * 24 * 60 * 60 * 1000,
+    },
     getErrorMessage: (requestError) =>
       getApiErrorMessage(
         requestError,
@@ -722,11 +741,11 @@ export const SchedulePage = () => {
                 className="schedule-subgroup-toggle"
               />
 
-              <p className="schedule-subgroup-note">
-                {isSavingSubgroup
-                  ? 'Сохраняем выбор подгруппы…'
-                  : 'Переключатель синхронизирован с профилем.'}
-              </p>
+              {isSavingSubgroup && (
+                <p className="schedule-subgroup-note">
+                  Сохраняем выбор подгруппы…
+                </p>
+              )}
 
               {subgroupError && (
                 <p className="schedule-subgroup-error">{subgroupError}</p>
@@ -742,8 +761,8 @@ export const SchedulePage = () => {
               </strong>
               <p className="schedule-subgroup-text">
                 {currentScheduleWeek
-                  ? `Текущая неделя по API БГУИР: ${currentScheduleWeek}. Выберите 1–4, чтобы посмотреть нужное расписание.`
-                  : 'Загружаем текущую неделю из API БГУИР.'}
+                  ? `Текущая неделя: ${currentScheduleWeek}.`
+                  : 'Неделя загружается.'}
               </p>
             </div>
 

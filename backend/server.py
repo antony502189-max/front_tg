@@ -2046,11 +2046,101 @@ def normalize_month_student_omission_counts(
     return result
 
 
+def _extract_omission_months_payload(payload: Any) -> Any:
+    if not isinstance(payload, Mapping):
+        return payload
+
+    for field in (
+        "monthStudentOmissionCounts",
+        "months",
+        "omissionCountByStudentForSemester",
+    ):
+        if payload.get(field) is not None:
+            return payload.get(field)
+
+    return payload
+
+
+def _extract_omission_gradebook_payload(payload: Any) -> Any:
+    if not isinstance(payload, Mapping):
+        return None
+
+    for field in ("gradeBook", "gradebook", "personalRating", "studentRating"):
+        if payload.get(field) is not None:
+            return payload.get(field)
+
+    return None
+
+
+def extract_gradebook_subject_omission_counts(
+    payload: Any,
+) -> list[dict[str, Any]]:
+    grouped_subjects: dict[str, dict[str, Any]] = {}
+
+    for record in iter_nested_dicts(payload):
+        lessons = first_list_field(record, "lessons")
+        if not isinstance(lessons, list):
+            continue
+
+        has_omission_lesson = any(
+            isinstance(item, Mapping)
+            and (
+                item.get("gradeBookOmissions") is not None
+                or item.get("lessonName") is not None
+                or item.get("lessonNameAbbrev") is not None
+            )
+            for item in lessons
+        )
+        if not has_omission_lesson:
+            continue
+
+        for index, item in enumerate(lessons):
+            if not isinstance(item, Mapping):
+                continue
+
+            subject_name, subject_key = extract_grade_subject_name(
+                item,
+                index,
+                "lessonName",
+                "lessonNameFull",
+                "lessonNameAbbrev",
+                "subject",
+                "discipline",
+                "disciplineName",
+                "name",
+                "title",
+            )
+            subject = grouped_subjects.setdefault(
+                subject_key,
+                {
+                    "subject": subject_name,
+                    "omissionCount": 0,
+                },
+            )
+            subject["omissionCount"] += _coerce_non_negative_int(
+                item.get("gradeBookOmissions")
+            )
+
+        break
+
+    result = list(grouped_subjects.values())
+    result.sort(
+        key=lambda item: (-item["omissionCount"], item["subject"].casefold())
+    )
+    return result
+
+
 def normalize_omissions_response(payload: Any) -> dict[str, Any]:
-    months = normalize_month_student_omission_counts(payload)
+    months = normalize_month_student_omission_counts(
+        _extract_omission_months_payload(payload)
+    )
+    subjects = extract_gradebook_subject_omission_counts(
+        _extract_omission_gradebook_payload(payload)
+    )
     return {
         "totalHours": sum(item["omissionCount"] for item in months),
         "months": months,
+        "subjects": subjects,
     }
 
 
@@ -2524,12 +2614,21 @@ class BackendApp:
                 status=400,
             )
 
-        return normalize_omissions_response(
-            self.omissions_service.fetch_month_student_omission_counts(
+        fetch_overview = getattr(
+            self.omissions_service,
+            "fetch_student_omissions_overview",
+            None,
+        )
+        raw_payload = (
+            fetch_overview(profile.iis_login, profile.iis_password)
+            if callable(fetch_overview)
+            else self.omissions_service.fetch_month_student_omission_counts(
                 profile.iis_login,
                 profile.iis_password,
             )
         )
+
+        return normalize_omissions_response(raw_payload)
 
     def build_route_payload(self, route: RouteConfig, query_value: str) -> JsonValue:
         builder = self._route_payload_builders.get(route.kind)

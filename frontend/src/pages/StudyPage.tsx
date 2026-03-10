@@ -18,6 +18,87 @@ import { buildStudyOverview, formatMarksLabel } from '../utils/study'
 
 const EMPTY_SUBJECTS: GradesResponse['subjects'] = []
 const EMPTY_OMISSION_MONTHS: OmissionsResponse['months'] = []
+const EMPTY_OMISSION_SUBJECTS: OmissionsResponse['subjects'] = []
+
+type SubjectOmissionLookup = {
+  exact: Map<string, number>
+  abbreviations: Map<string, number | null>
+}
+
+const normalizeSubjectKey = (value: string) =>
+  value
+    .toLocaleLowerCase('ru-RU')
+    .replace(/ё/g, 'е')
+    .replace(/[\s().,:;/-]+/g, '')
+
+const tokenizeSubjectName = (value: string) =>
+  value
+    .toLocaleLowerCase('ru-RU')
+    .replace(/ё/g, 'е')
+    .split(/[^a-zа-я0-9]+/i)
+    .filter((token) => token.length > 0)
+
+const getSubjectAbbreviationKey = (value: string) => {
+  const tokens = tokenizeSubjectName(value)
+
+  if (tokens.length <= 1) {
+    return ''
+  }
+
+  return tokens.map((token) => token[0]).join('')
+}
+
+const buildSubjectOmissionLookup = (
+  subjects: OmissionsResponse['subjects'],
+): SubjectOmissionLookup => {
+  const exact = new Map<string, number>()
+  const abbreviations = new Map<string, number | null>()
+
+  for (const subject of subjects) {
+    const exactKey = normalizeSubjectKey(subject.subject)
+    if (exactKey) {
+      exact.set(exactKey, subject.omissionCount)
+    }
+
+    const abbreviationKey = getSubjectAbbreviationKey(subject.subject)
+    if (!abbreviationKey) {
+      continue
+    }
+
+    const currentValue = abbreviations.get(abbreviationKey)
+    if (currentValue === undefined) {
+      abbreviations.set(abbreviationKey, subject.omissionCount)
+      continue
+    }
+
+    if (currentValue !== subject.omissionCount) {
+      abbreviations.set(abbreviationKey, null)
+    }
+  }
+
+  return {
+    exact,
+    abbreviations,
+  }
+}
+
+const resolveSubjectOmissionCount = (
+  subjectName: string,
+  lookup: SubjectOmissionLookup,
+) => {
+  const exactValue = lookup.exact.get(normalizeSubjectKey(subjectName))
+  if (exactValue !== undefined) {
+    return exactValue
+  }
+
+  const abbreviationKey = getSubjectAbbreviationKey(subjectName)
+  if (!abbreviationKey) {
+    return undefined
+  }
+
+  const abbreviationValue = lookup.abbreviations.get(abbreviationKey)
+  return abbreviationValue === null ? undefined : abbreviationValue
+}
 
 const getMarkTone = (value: number) => {
   if (value >= 8) {
@@ -68,9 +149,10 @@ export const StudyPage = () => {
 
   const sessionUserId = resolveSessionUserId()
   const normalizedSessionUserId = sessionUserId.trim()
-  const normalizedStudentCardNumber = studentCardNumber.trim()
-  const normalizedGroupNumber = groupNumber.trim()
   const normalizedIisLogin = iisLogin.trim()
+  const normalizedStudentCardNumber =
+    studentCardNumber.trim() || normalizedIisLogin
+  const normalizedGroupNumber = groupNumber.trim()
   const hasStudentCardNumber = normalizedStudentCardNumber.length > 0
   const hasIisCredentials =
     normalizedIisLogin.length > 0 && hasIisPassword
@@ -79,6 +161,12 @@ export const StudyPage = () => {
     role === 'student' &&
     normalizedSessionUserId.length > 0 &&
     hasIisCredentials
+  const gradesPersistentCacheKey = canLoadGrades
+    ? `grades:${normalizedStudentCardNumber}:${normalizedGroupNumber || 'nogroup'}`
+    : null
+  const omissionsPersistentCacheKey = canLoadOmissions
+    ? `omissions:${normalizedSessionUserId}:${normalizedIisLogin}`
+    : null
 
   const loadGrades = useCallback(
     (signal: AbortSignal) =>
@@ -112,6 +200,10 @@ export const StudyPage = () => {
     initialData: null,
     load: loadGrades,
     keepPreviousData: true,
+    persistentCache: {
+      key: gradesPersistentCacheKey,
+      maxAgeMs: 30 * 24 * 60 * 60 * 1000,
+    },
     getErrorMessage: (requestError) =>
       getApiErrorMessage(
         requestError,
@@ -134,6 +226,10 @@ export const StudyPage = () => {
     initialData: null,
     load: loadOmissions,
     keepPreviousData: true,
+    persistentCache: {
+      key: omissionsPersistentCacheKey,
+      maxAgeMs: 14 * 24 * 60 * 60 * 1000,
+    },
     getErrorMessage: (requestError) =>
       getApiErrorMessage(
         requestError,
@@ -143,18 +239,25 @@ export const StudyPage = () => {
 
   const displayMessage = hasStudentCardNumber
     ? error
-    : 'Укажите номер зачётки в профиле, чтобы видеть успеваемость.'
+    : 'Укажите логин IIS в профиле, чтобы видеть успеваемость.'
   const blockingDisplayMessage = !hasData ? displayMessage : null
   const refreshError = hasData ? error : null
   const canRenderResults = hasStudentCardNumber && hasData
   const summary = data?.summary
   const subjects = data?.subjects ?? EMPTY_SUBJECTS
   const omissionMonths = omissionsData?.months ?? EMPTY_OMISSION_MONTHS
+  const omissionSubjects =
+    omissionsData?.subjects ?? EMPTY_OMISSION_SUBJECTS
   const omissionTotalHours = omissionsData?.totalHours ?? 0
   const warning = data?.warning
   const omissionsSetupMessage = hasIisCredentials
     ? null
-    : 'Добавьте логин и пароль IIS в профиле, чтобы загружать пропуски.'
+    : normalizedIisLogin.length > 0
+      ? 'Добавьте пароль IIS в профиле, чтобы загружать пропуски.'
+      : 'Добавьте логин и пароль IIS в профиле, чтобы загружать пропуски.'
+  const omissionSubjectLookup = useMemo(() => {
+    return buildSubjectOmissionLookup(omissionSubjects)
+  }, [omissionSubjects])
   const { subjectSummaries, rating } = useMemo(
     () => {
       const overview = buildStudyOverview(subjects)
@@ -210,9 +313,9 @@ export const StudyPage = () => {
           <section className="study-role-card">
             <h2 className="study-role-title">Роль преподавателя</h2>
             <p className="study-role-text">
-              На преподавательском backend пока нет выдачи оценок и зачётки. Как
-              только API появится и станет стабильным, раздел будет показывать
-              данные по успеваемости и рейтингу.
+              На преподавательском backend пока нет выдачи данных по
+              успеваемости. Как только API появится и станет стабильным,
+              раздел будет показывать данные по рейтингу и предметам.
             </p>
           </section>
         </div>
@@ -227,8 +330,7 @@ export const StudyPage = () => {
           <div>
             <h1 className="planner-title">Учёба</h1>
             <p className="planner-subtitle">
-              Следите за баллом успеваемости по номеру вашей
-              зачётки.
+              Следите за баллом успеваемости и пропусками из IIS.
             </p>
           </div>
         </header>
@@ -247,7 +349,7 @@ export const StudyPage = () => {
             <p className="study-student-subtitle study-student-subtitle--meta">
               {studyMetaLabel}
               {' · '}
-              Зачётка {normalizedStudentCardNumber || 'не указана'}
+              Логин IIS {normalizedStudentCardNumber || 'не указан'}
             </p>
           </div>
 
@@ -472,6 +574,11 @@ export const StudyPage = () => {
               {subjectSummaries.length > 0 ? (
                 <div className="study-subject-list">
                   {subjectSummaries.map((subject) => {
+                    const subjectOmissionCount = resolveSubjectOmissionCount(
+                      subject.subject,
+                      omissionSubjectLookup,
+                    )
+
                     return (
                       <article
                         key={subject.id}
@@ -489,13 +596,25 @@ export const StudyPage = () => {
                             )}
                           </div>
 
-                          <div className="study-subject-summary">
-                            <span className="study-subject-summary-label">
-                              Средний
-                            </span>
-                            <strong className="study-subject-summary-value">
-                              {subject.average?.toFixed(1) ?? '?'}
-                            </strong>
+                          <div className="study-subject-metrics">
+                            <div className="study-subject-summary">
+                              <span className="study-subject-summary-label">
+                                Средний
+                              </span>
+                              <strong className="study-subject-summary-value">
+                                {subject.average?.toFixed(1) ?? '?'}
+                              </strong>
+                            </div>
+                            <div className="study-subject-summary study-subject-summary--omissions">
+                              <span className="study-subject-summary-label">
+                                Пропуски
+                              </span>
+                              <strong className="study-subject-summary-value">
+                                {subjectOmissionCount === undefined
+                                  ? '—'
+                                  : `${subjectOmissionCount} ч.`}
+                              </strong>
+                            </div>
                           </div>
                         </header>
 

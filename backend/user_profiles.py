@@ -74,7 +74,10 @@ class UserProfile:
 
         if role == "student":
             group_number = _as_string(payload.get("groupNumber"))
-            student_card_number = _as_string(payload.get("studentCardNumber"))
+            iis_login = _as_string(payload.get("iisLogin"))
+            student_card_number = (
+                _as_string(payload.get("studentCardNumber")) or iis_login
+            )
             if group_number is None:
                 raise ProfileValidationError(
                     'Field "groupNumber" is required for student profiles'
@@ -90,7 +93,7 @@ class UserProfile:
                 subgroup=subgroup,
                 group_number=group_number,
                 student_card_number=student_card_number,
-                iis_login=_as_string(payload.get("iisLogin")),
+                iis_login=iis_login,
                 iis_password=_as_string(payload.get("iisPassword")),
                 updated_at=updated_at,
             )
@@ -262,10 +265,24 @@ class UserProfileStore:
                 and existing_profile.role == "student"
                 and profile.role == "student"
             ):
+                preserved_iis_login = (
+                    profile.iis_login or existing_profile.iis_login
+                )
+                should_drop_saved_password = (
+                    profile.iis_password is None
+                    and profile.iis_login is not None
+                    and existing_profile.iis_login is not None
+                    and profile.iis_login != existing_profile.iis_login
+                )
                 stored_profile = replace(
                     profile,
-                    iis_login=profile.iis_login or existing_profile.iis_login,
-                    iis_password=profile.iis_password or existing_profile.iis_password,
+                    iis_login=preserved_iis_login,
+                    iis_password=(
+                        None
+                        if should_drop_saved_password
+                        else profile.iis_password
+                        or existing_profile.iis_password
+                    ),
                 )
 
             payload[profile.telegram_user_id] = stored_profile.to_dict(

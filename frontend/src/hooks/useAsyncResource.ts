@@ -5,6 +5,10 @@ import {
   useEffectEvent,
   useState,
 } from 'react'
+import {
+  getPersistentAsyncResourceCacheEntry,
+  setPersistentAsyncResourceCacheEntry,
+} from './asyncResourcePersistentCache'
 
 type AsyncResourceStatus = 'idle' | 'success' | 'error'
 
@@ -24,6 +28,10 @@ type UseAsyncResourceOptions<T> = {
   load: (signal: AbortSignal) => Promise<T>
   getErrorMessage: (error: unknown) => string
   keepPreviousData?: boolean
+  persistentCache?: {
+    key: string | null
+    maxAgeMs?: number
+  }
 }
 
 type AsyncResourceCacheEntry<T> = {
@@ -35,17 +43,6 @@ const asyncResourceCache = new Map<
   string,
   AsyncResourceCacheEntry<unknown>
 >()
-
-const getCachedResource = <T,>(requestKey: string | null) => {
-  if (!requestKey) {
-    return null
-  }
-
-  const cachedEntry = asyncResourceCache.get(requestKey)
-  return cachedEntry
-    ? (cachedEntry as AsyncResourceCacheEntry<T>)
-    : null
-}
 
 const isAbortError = (error: unknown) => {
   if (error instanceof DOMException) {
@@ -66,13 +63,37 @@ export const useAsyncResource = <T,>({
   load,
   getErrorMessage,
   keepPreviousData = false,
+  persistentCache,
 }: UseAsyncResourceOptions<T>) => {
   const logicalRequestKey =
     enabled && requestKey ? requestKey : null
+  const persistentCacheKey =
+    enabled && persistentCache?.key ? persistentCache.key : null
   const [reloadToken, setReloadToken] = useState(0)
+  const getCachedResource = useCallback(
+    (resolvedRequestKey: string | null) => {
+      if (!resolvedRequestKey) {
+        return null
+      }
+
+      const runtimeEntry = asyncResourceCache.get(resolvedRequestKey)
+      if (runtimeEntry) {
+        return runtimeEntry as AsyncResourceCacheEntry<T>
+      }
+
+      if (!persistentCacheKey) {
+        return null
+      }
+
+      return getPersistentAsyncResourceCacheEntry<T>(
+        persistentCacheKey,
+      )
+    },
+    [persistentCacheKey],
+  )
   const initialCachedResource =
     keepPreviousData && logicalRequestKey
-      ? getCachedResource<T>(logicalRequestKey)
+      ? getCachedResource(logicalRequestKey)
       : null
   const [state, setState] = useState<AsyncResourceState<T>>({
     requestKey: null,
@@ -89,7 +110,7 @@ export const useAsyncResource = <T,>({
       : null
   const cachedResource =
     keepPreviousData && logicalRequestKey
-      ? getCachedResource<T>(logicalRequestKey)
+      ? getCachedResource(logicalRequestKey)
       : null
 
   const commitSuccess = useEffectEvent(
@@ -103,6 +124,14 @@ export const useAsyncResource = <T,>({
         data,
         updatedAt,
       })
+      setPersistentAsyncResourceCacheEntry(
+        persistentCacheKey,
+        {
+          data,
+          updatedAt,
+          maxAgeMs: persistentCache?.maxAgeMs ?? null,
+        },
+      )
 
       startTransition(() => {
         setState({
@@ -127,7 +156,7 @@ export const useAsyncResource = <T,>({
         setState((current) => {
           const cachedEntry =
             keepPreviousData
-              ? getCachedResource<T>(resolvedLogicalRequestKey)
+              ? getCachedResource(resolvedLogicalRequestKey)
               : null
           const shouldPreserveData =
             keepPreviousData &&

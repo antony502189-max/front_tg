@@ -72,6 +72,8 @@ const sanitizePersistedUser = (
     studentCardNumber:
       typeof persisted?.studentCardNumber === 'string'
         ? persisted.studentCardNumber
+        : typeof persisted?.iisLogin === 'string'
+          ? persisted.iisLogin
         : defaultState.studentCardNumber,
     iisLogin:
       typeof persisted?.iisLogin === 'string'
@@ -116,7 +118,8 @@ const sanitizePersistedUser = (
 const mapProfileToState = (profile: UserProfile): UserData => ({
   role: profile.role,
   groupNumber: profile.groupNumber?.trim() ?? '',
-  studentCardNumber: profile.studentCardNumber?.trim() ?? '',
+  studentCardNumber:
+    profile.studentCardNumber?.trim() ?? profile.iisLogin?.trim() ?? '',
   iisLogin: profile.iisLogin?.trim() ?? '',
   hasIisPassword: profile.hasIisPassword === true,
   employeeId: profile.employeeId?.trim() ?? '',

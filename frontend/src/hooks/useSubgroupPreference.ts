@@ -38,13 +38,16 @@ const buildProfilePayload = ({
   }
 
   if (role === 'student') {
+    const normalizedIisLogin = iisLogin.trim()
+
     return {
       telegramUserId,
       role: 'student',
       subgroup,
       groupNumber: groupNumber.trim(),
-      studentCardNumber: studentCardNumber.trim(),
-      iisLogin: iisLogin.trim() || undefined,
+      studentCardNumber:
+        studentCardNumber.trim() || normalizedIisLogin,
+      iisLogin: normalizedIisLogin || undefined,
     }
   }
 
