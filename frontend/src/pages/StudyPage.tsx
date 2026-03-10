@@ -67,13 +67,18 @@ export const StudyPage = () => {
   )
 
   const sessionUserId = resolveSessionUserId()
+  const normalizedSessionUserId = sessionUserId.trim()
   const normalizedStudentCardNumber = studentCardNumber.trim()
   const normalizedGroupNumber = groupNumber.trim()
   const normalizedIisLogin = iisLogin.trim()
   const hasStudentCardNumber = normalizedStudentCardNumber.length > 0
+  const hasIisCredentials =
+    normalizedIisLogin.length > 0 && hasIisPassword
   const canLoadGrades = role === 'student' && hasStudentCardNumber
   const canLoadOmissions =
-    role === 'student' && sessionUserId.trim().length > 0
+    role === 'student' &&
+    normalizedSessionUserId.length > 0 &&
+    hasIisCredentials
 
   const loadGrades = useCallback(
     (signal: AbortSignal) =>
@@ -85,10 +90,10 @@ export const StudyPage = () => {
   )
   const loadOmissions = useCallback(
     (signal: AbortSignal) =>
-      fetchOmissions(sessionUserId, {
+      fetchOmissions(normalizedSessionUserId, {
         signal,
       }),
-    [sessionUserId],
+    [normalizedSessionUserId],
   )
 
   const {
@@ -124,7 +129,7 @@ export const StudyPage = () => {
   } = useAsyncResource<OmissionsResponse | null>({
     enabled: canLoadOmissions,
     requestKey: canLoadOmissions
-      ? `omissions:${sessionUserId}:${normalizedIisLogin}:${hasIisPassword ? '1' : '0'}`
+      ? `omissions:${normalizedSessionUserId}:${normalizedIisLogin}:${hasIisPassword ? '1' : '0'}`
       : null,
     initialData: null,
     load: loadOmissions,
@@ -147,6 +152,9 @@ export const StudyPage = () => {
   const omissionMonths = omissionsData?.months ?? EMPTY_OMISSION_MONTHS
   const omissionTotalHours = omissionsData?.totalHours ?? 0
   const warning = data?.warning
+  const omissionsSetupMessage = hasIisCredentials
+    ? null
+    : 'Добавьте логин и пароль IIS в профиле, чтобы загружать пропуски.'
   const { subjectSummaries, rating } = useMemo(
     () => {
       const overview = buildStudyOverview(subjects)
@@ -329,6 +337,15 @@ export const StudyPage = () => {
                     <span className="app-skeleton study-inline-skeleton study-inline-skeleton--omissions-value" />
                   </div>
                 ))}
+              </div>
+            ) : omissionsSetupMessage ? (
+              <div className="study-empty-card study-empty-card--inline">
+                <h3 className="study-empty-title">
+                  Нужны данные IIS
+                </h3>
+                <p className="study-empty-subtitle">
+                  {omissionsSetupMessage}
+                </p>
               </div>
             ) : omissionsError && !hasOmissionsData ? (
               <div className="study-error-card study-error-card--inline">

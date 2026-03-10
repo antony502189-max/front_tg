@@ -167,11 +167,16 @@ class UserProfileStore:
     def __init__(self, file_path: Path | None = None) -> None:
         self.file_path = file_path or DEFAULT_STORE_PATH
         self.lock = Lock()
+        self._cached_payload: dict[str, dict[str, Any]] | None = None
+        self._cached_mtime_ns: int | None = None
 
-    def _load_unlocked(self) -> dict[str, dict[str, Any]]:
-        if not self.file_path.exists():
-            return {}
+    def _stat_mtime_ns_unlocked(self) -> int | None:
+        try:
+            return self.file_path.stat().st_mtime_ns
+        except OSError:
+            return None
 
+    def _read_file_payload_unlocked(self) -> dict[str, dict[str, Any]]:
         try:
             raw = self.file_path.read_text(encoding="utf-8")
         except OSError:
@@ -196,6 +201,23 @@ class UserProfileStore:
 
         return normalized
 
+    def _load_unlocked(self) -> dict[str, dict[str, Any]]:
+        current_mtime_ns = self._stat_mtime_ns_unlocked()
+        if (
+            self._cached_payload is not None
+            and current_mtime_ns == self._cached_mtime_ns
+        ):
+            return self._cached_payload
+
+        payload = (
+            self._read_file_payload_unlocked()
+            if current_mtime_ns is not None
+            else {}
+        )
+        self._cached_payload = payload
+        self._cached_mtime_ns = current_mtime_ns
+        return payload
+
     def _save_unlocked(self, payload: dict[str, dict[str, Any]]) -> None:
         self.file_path.parent.mkdir(parents=True, exist_ok=True)
         temporary_path = self.file_path.with_suffix(".tmp")
@@ -204,6 +226,8 @@ class UserProfileStore:
             encoding="utf-8",
         )
         temporary_path.replace(self.file_path)
+        self._cached_payload = payload
+        self._cached_mtime_ns = self._stat_mtime_ns_unlocked()
 
     def get(self, telegram_user_id: str) -> UserProfile | None:
         normalized_id = _as_string(telegram_user_id)

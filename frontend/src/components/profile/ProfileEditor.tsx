@@ -5,6 +5,7 @@
   type FormEvent,
 } from 'react'
 import { Search } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import { getApiErrorMessage } from '../../api/client'
 import { saveUserProfile } from '../../api/profile'
 import { searchTeachers, type Employee } from '../../api/employees'
@@ -48,6 +49,36 @@ const defaultTouched: TouchedState = {
 const normalizeTeacherQuery = (value: string) =>
   value.trim().replace(/\s+/g, ' ')
 
+const buildSelectedTeacher = ({
+  employeeId,
+  urlId,
+  fullName,
+  position,
+  department,
+  avatarUrl,
+}: {
+  employeeId: string
+  urlId: string
+  fullName: string
+  position: string
+  department: string
+  avatarUrl: string
+}): Employee | null => {
+  if (!employeeId || !urlId || !fullName) {
+    return null
+  }
+
+  return {
+    id: urlId || employeeId,
+    employeeId,
+    urlId,
+    fullName,
+    position: position || undefined,
+    department: department || undefined,
+    avatarUrl: avatarUrl || undefined,
+  }
+}
+
 const ROLE_OPTIONS: Array<{
   value: UserRole
   label: string
@@ -71,29 +102,37 @@ export const ProfileEditor = ({
   submitLabel,
   onSaved,
 }: ProfileEditorProps) => {
-  const applyUserProfile = useUserStore(
-    (state) => state.applyUserProfile,
+  const {
+    applyUserProfile,
+    subgroup,
+    role: roleFromStore,
+    groupNumber: initialGroupNumber,
+    studentCardNumber: initialStudentCardNumber,
+    iisLogin: initialIisLogin,
+    hasIisPassword: initialHasIisPassword,
+    employeeId: initialEmployeeId,
+    urlId: initialUrlId,
+    fullName: initialFullName,
+    position: initialPosition,
+    department: initialDepartment,
+    avatarUrl: initialAvatarUrl,
+  } = useUserStore(
+    useShallow((state) => ({
+      applyUserProfile: state.applyUserProfile,
+      subgroup: state.subgroup,
+      role: state.role,
+      groupNumber: state.groupNumber,
+      studentCardNumber: state.studentCardNumber,
+      iisLogin: state.iisLogin,
+      hasIisPassword: state.hasIisPassword,
+      employeeId: state.employeeId,
+      urlId: state.urlId,
+      fullName: state.fullName,
+      position: state.position,
+      department: state.department,
+      avatarUrl: state.avatarUrl,
+    })),
   )
-  const subgroup = useUserStore((state) => state.subgroup)
-  const roleFromStore = useUserStore((state) => state.role)
-  const initialGroupNumber = useUserStore(
-    (state) => state.groupNumber,
-  )
-  const initialStudentCardNumber = useUserStore(
-    (state) => state.studentCardNumber,
-  )
-  const initialIisLogin = useUserStore((state) => state.iisLogin)
-  const initialHasIisPassword = useUserStore(
-    (state) => state.hasIisPassword,
-  )
-  const initialEmployeeId = useUserStore(
-    (state) => state.employeeId,
-  )
-  const initialUrlId = useUserStore((state) => state.urlId)
-  const initialFullName = useUserStore((state) => state.fullName)
-  const initialPosition = useUserStore((state) => state.position)
-  const initialDepartment = useUserStore((state) => state.department)
-  const initialAvatarUrl = useUserStore((state) => state.avatarUrl)
 
   const [role, setRole] = useState<UserRole>(
     roleFromStore ?? 'student',
@@ -107,18 +146,16 @@ export const ProfileEditor = ({
   const [iisLogin, setIisLogin] = useState(initialIisLogin)
   const [iisPassword, setIisPassword] = useState('')
   const [teacherQuery, setTeacherQuery] = useState(initialFullName)
-  const [selectedTeacher, setSelectedTeacher] = useState<Employee | null>(
-    initialEmployeeId && initialUrlId && initialFullName
-      ? {
-          id: initialUrlId || initialEmployeeId,
-          employeeId: initialEmployeeId,
-          urlId: initialUrlId,
-          fullName: initialFullName,
-          position: initialPosition || undefined,
-          department: initialDepartment || undefined,
-          avatarUrl: initialAvatarUrl || undefined,
-        }
-      : null,
+  const [selectedTeacher, setSelectedTeacher] = useState(
+    () =>
+      buildSelectedTeacher({
+        employeeId: initialEmployeeId,
+        urlId: initialUrlId,
+        fullName: initialFullName,
+        position: initialPosition,
+        department: initialDepartment,
+        avatarUrl: initialAvatarUrl,
+      }),
   )
   const [touched, setTouched] = useState<TouchedState>(defaultTouched)
   const [isSaving, setIsSaving] = useState(false)
@@ -132,17 +169,14 @@ export const ProfileEditor = ({
     setIisPassword('')
     setTeacherQuery(initialFullName)
     setSelectedTeacher(
-      initialEmployeeId && initialUrlId && initialFullName
-        ? {
-            id: initialUrlId || initialEmployeeId,
-            employeeId: initialEmployeeId,
-            urlId: initialUrlId,
-            fullName: initialFullName,
-            position: initialPosition || undefined,
-            department: initialDepartment || undefined,
-            avatarUrl: initialAvatarUrl || undefined,
-          }
-        : null,
+      buildSelectedTeacher({
+        employeeId: initialEmployeeId,
+        urlId: initialUrlId,
+        fullName: initialFullName,
+        position: initialPosition,
+        department: initialDepartment,
+        avatarUrl: initialAvatarUrl,
+      }),
     )
     setTouched(defaultTouched)
     setSaveError(null)
@@ -164,12 +198,6 @@ export const ProfileEditor = ({
   const selectedTeacherQuery = selectedTeacher
     ? normalizeTeacherQuery(selectedTeacher.fullName)
     : ''
-  const hasTeacherQuery =
-    role === 'teacher' && normalizedTeacherQuery.length >= 2
-  const shouldSearchTeachers =
-    hasTeacherQuery &&
-    (!selectedTeacher ||
-      normalizedTeacherQuery !== selectedTeacherQuery)
   const deferredTeacherQuery = useDeferredValue(
     normalizedTeacherQuery,
   )
@@ -177,6 +205,18 @@ export const ProfileEditor = ({
     deferredTeacherQuery,
     300,
   )
+  const hasDebouncedTeacherQuery =
+    role === 'teacher' && debouncedTeacherQuery.length >= 2
+  const shouldSearchTeachers =
+    hasDebouncedTeacherQuery &&
+    (!selectedTeacher ||
+      debouncedTeacherQuery !== selectedTeacherQuery)
+  const isTeacherSearchPending =
+    role === 'teacher' &&
+    normalizedTeacherQuery.length >= 2 &&
+    normalizedTeacherQuery !== debouncedTeacherQuery &&
+    (!selectedTeacher ||
+      normalizedTeacherQuery !== selectedTeacherQuery)
 
   const teacherResource = useAsyncResource<Employee[]>({
     enabled: shouldSearchTeachers,
@@ -218,6 +258,7 @@ export const ProfileEditor = ({
   const isFormValid =
     role === 'student' ? isStudentFormValid : isTeacherFormValid
   const shouldRenderTeacherSearchResults =
+    isTeacherSearchPending ||
     teacherResource.isLoading ||
     teacherResource.error !== null ||
     shouldSearchTeachers ||
@@ -237,12 +278,15 @@ export const ProfileEditor = ({
     setTeacherQuery(value)
     setTouched((current) => ({
       ...current,
-      teacher: value.trim().length > 0 ? current.teacher : false,
+      teacher:
+        normalizeTeacherQuery(value).length > 0
+          ? current.teacher
+          : false,
     }))
 
     if (
       selectedTeacher &&
-      value.trim() !== selectedTeacher.fullName
+      normalizeTeacherQuery(value) !== selectedTeacherQuery
     ) {
       setSelectedTeacher(null)
     }
@@ -567,7 +611,8 @@ export const ProfileEditor = ({
 
             {shouldRenderTeacherSearchResults && (
               <div className="profile-search-results">
-                {teacherResource.isLoading ? (
+                {isTeacherSearchPending ||
+                teacherResource.isLoading ? (
                   <div className="univer-skeleton-list">
                     <div className="univer-skeleton-card" />
                     <div className="univer-skeleton-card" />

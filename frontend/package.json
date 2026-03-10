@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "dev:backend": "cd .. && python -m backend.server",
     "dev:bot": "cd .. && python -m backend.telegram_bot",
-    "test:backend": "cd .. && python -m unittest -v backend.server_test backend.telegram_bot_test backend.env_test"
+    "test:backend": "cd .. && python -m unittest -v backend.server_test backend.telegram_bot_test backend.env_test backend.user_profiles_test"
   },
   "dependencies": {
     "@twa-dev/sdk": "^8.0.2",
