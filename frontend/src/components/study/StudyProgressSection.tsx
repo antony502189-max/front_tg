@@ -326,9 +326,11 @@ export const StudyProgressSection = ({
                         <strong className="study-progress-subject-name">
                           {subject.subject}
                         </strong>
-                        <span className="study-progress-subject-teacher">
-                          {subject.teacher ?? 'Преподаватель не указан'}
-                        </span>
+                        {subject.teacher && (
+                          <span className="study-progress-subject-teacher">
+                            {subject.teacher}
+                          </span>
+                        )}
                         <span className="study-progress-subject-meta">
                           {subject.average?.toFixed(1) ?? '—'} ср. ·{' '}
                           {subject.marksCount}{' '}
@@ -435,9 +437,11 @@ export const StudyProgressSection = ({
                   <strong className="study-progress-subject-name">
                     {subject.subject}
                   </strong>
-                  <span className="study-progress-subject-teacher">
-                    {subject.teacher ?? 'Преподаватель не указан'}
-                  </span>
+                  {subject.teacher && (
+                    <span className="study-progress-subject-teacher">
+                      {subject.teacher}
+                    </span>
+                  )}
                   <span className="study-progress-subject-meta">
                     {subject.average?.toFixed(1) ?? '—'} ср. ·{' '}
                     {subject.marksCount}{' '}
