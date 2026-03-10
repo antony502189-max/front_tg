@@ -1,7 +1,14 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Star, Trophy } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
-import { fetchGrades, type GradesResponse } from '../api/grades'
+import {
+  fetchGrades,
+  fetchGradesSummary,
+  type GradeMark,
+  type GradesResponse,
+  type GradesSummary,
+  type GradesSummaryResponse,
+} from '../api/grades'
 import {
   fetchOmissions,
   type OmissionsResponse,
@@ -14,11 +21,28 @@ import {
 import { useAsyncResource } from '../hooks/useAsyncResource'
 import { useUserStore } from '../store/userStore'
 import { resolveSessionUserId } from '../telegram/session'
-import { buildStudyOverview, formatMarksLabel } from '../utils/study'
+import {
+  buildStudyOverview,
+  formatMarksLabel,
+  type StudyMarkGroupKey,
+  type StudySubjectSummary,
+} from '../utils/study'
 
 const EMPTY_SUBJECTS: GradesResponse['subjects'] = []
 const EMPTY_OMISSION_MONTHS: OmissionsResponse['months'] = []
 const EMPTY_OMISSION_SUBJECTS: OmissionsResponse['subjects'] = []
+const BASE_PROGRESS_MARK_COLUMNS: Array<{
+  key: StudyMarkGroupKey
+  label: string
+}> = [
+  { key: 'lab', label: 'ЛР' },
+  { key: 'practice', label: 'ПЗ' },
+  { key: 'lecture', label: 'ЛК' },
+]
+const OTHER_PROGRESS_MARK_COLUMN = {
+  key: 'other' as const,
+  label: 'Др.',
+}
 
 type SubjectOmissionLookup = {
   exact: Map<string, number>
@@ -112,30 +136,6 @@ const getMarkTone = (value: number) => {
   return 'danger'
 }
 
-const getAverageTone = (value: number | null) => {
-  if (value === null) {
-    return 'neutral'
-  }
-
-  return getMarkTone(value)
-}
-
-const getOmissionTone = (value: number | undefined) => {
-  if (value === undefined) {
-    return 'neutral'
-  }
-
-  if (value === 0) {
-    return 'success'
-  }
-
-  if (value <= 3) {
-    return 'warning'
-  }
-
-  return 'danger'
-}
-
 const StudyMetricValue = ({
   isLoading,
   value,
@@ -154,6 +154,108 @@ const StudyMetricValue = ({
     value
   )
 
+const getGroupAverage = (marks: GradeMark[]) => {
+  if (marks.length === 0) {
+    return null
+  }
+
+  const total = marks.reduce((sum, mark) => sum + mark.value, 0)
+  return total / marks.length
+}
+
+const getProgressMarkGroup = (
+  subject: StudySubjectSummary,
+  key: StudyMarkGroupKey,
+) => subject.markGroups.find((group) => group.key === key)
+
+const getProgressCellTone = (marks: GradeMark[]) => {
+  if (marks.length === 0) {
+    return 'muted'
+  }
+
+  const average = getGroupAverage(marks)
+  return average === null ? 'muted' : getMarkTone(average)
+}
+
+const getOmissionCellTone = (value: number | undefined) => {
+  if (value === undefined) {
+    return 'muted'
+  }
+
+  if (value === 0) {
+    return 'success'
+  }
+
+  if (value <= 3) {
+    return 'warning'
+  }
+
+  return 'danger'
+}
+
+const formatProgressCellMeta = (marks: GradeMark[]) => {
+  if (marks.length === 0) {
+    return 'нет оценок'
+  }
+
+  const average = getGroupAverage(marks)
+  return average === null ? 'без среднего' : `${average.toFixed(1)} ср.`
+}
+
+const formatProgressMarkValue = (value: number) =>
+  Number.isInteger(value) ? String(value) : value.toFixed(1)
+
+const getOmissionCellMeta = (value: number | undefined) => {
+  if (value === undefined) {
+    return 'нет данных'
+  }
+
+  if (value === 0) {
+    return 'без пропусков'
+  }
+
+  return 'неуваж.'
+}
+
+const getPopoverAlignmentClass = (
+  columnIndex: number,
+  totalColumns: number,
+) => {
+  if (columnIndex === totalColumns - 1) {
+    return 'study-progress-popover--end'
+  }
+
+  if (columnIndex > 0) {
+    return 'study-progress-popover--center'
+  }
+
+  return ''
+}
+
+const mergeGradesSummary = (
+  gradesSummary: GradesSummary | undefined,
+  ratingSummary: GradesSummary | undefined,
+): GradesSummary | undefined => {
+  const average = ratingSummary?.average ?? gradesSummary?.average
+  const position = ratingSummary?.position ?? gradesSummary?.position
+  const speciality =
+    ratingSummary?.speciality ?? gradesSummary?.speciality
+
+  if (
+    average === undefined &&
+    position === undefined &&
+    speciality === undefined
+  ) {
+    return undefined
+  }
+
+  return {
+    ...(average !== undefined ? { average } : {}),
+    ...(position !== undefined ? { position } : {}),
+    ...(speciality !== undefined ? { speciality } : {}),
+  }
+}
+
 export const StudyPage = () => {
   const {
     role,
@@ -170,6 +272,8 @@ export const StudyPage = () => {
       hasIisPassword: state.hasIisPassword,
     })),
   )
+  const [activeProgressCellId, setActiveProgressCellId] =
+    useState<string | null>(null)
 
   const sessionUserId = resolveSessionUserId()
   const normalizedSessionUserId = sessionUserId.trim()
@@ -186,7 +290,10 @@ export const StudyPage = () => {
     normalizedSessionUserId.length > 0 &&
     hasIisCredentials
   const gradesPersistentCacheKey = canLoadGrades
-    ? `grades:${normalizedStudentCardNumber}:${normalizedGroupNumber || 'nogroup'}`
+    ? `grades:${normalizedStudentCardNumber}`
+    : null
+  const gradesSummaryPersistentCacheKey = canLoadGrades
+    ? `grades-summary:${normalizedStudentCardNumber}:${normalizedGroupNumber || 'nogroup'}`
     : null
   const omissionsPersistentCacheKey = canLoadOmissions
     ? `omissions:${normalizedSessionUserId}:${normalizedIisLogin}`
@@ -194,7 +301,12 @@ export const StudyPage = () => {
 
   const loadGrades = useCallback(
     (signal: AbortSignal) =>
-      fetchGrades(normalizedStudentCardNumber, {
+      fetchGrades(normalizedStudentCardNumber, { signal }),
+    [normalizedStudentCardNumber],
+  )
+  const loadGradesSummary = useCallback(
+    (signal: AbortSignal) =>
+      fetchGradesSummary(normalizedStudentCardNumber, {
         groupNumber: normalizedGroupNumber,
         signal,
       }),
@@ -219,7 +331,7 @@ export const StudyPage = () => {
   } = useAsyncResource<GradesResponse | null>({
     enabled: canLoadGrades,
     requestKey: canLoadGrades
-      ? `${normalizedStudentCardNumber}:${normalizedGroupNumber}`
+      ? normalizedStudentCardNumber
       : null,
     initialData: null,
     load: loadGrades,
@@ -232,6 +344,33 @@ export const StudyPage = () => {
       getApiErrorMessage(
         requestError,
         'Не удалось загрузить оценки по успеваемости.',
+      ),
+  })
+  const canLoadGradesSummary = canLoadGrades
+  const {
+    data: summaryData,
+    error: summaryError,
+    hasData: hasSummaryData,
+    isInitialLoading: isSummaryInitialLoading,
+    isRefreshing: isSummaryRefreshing,
+    reload: reloadSummary,
+    updatedAt: summaryUpdatedAt,
+  } = useAsyncResource<GradesSummaryResponse | null>({
+    enabled: canLoadGradesSummary,
+    requestKey: canLoadGradesSummary
+      ? `summary:${normalizedStudentCardNumber}:${normalizedGroupNumber || 'nogroup'}`
+      : null,
+    initialData: null,
+    load: loadGradesSummary,
+    keepPreviousData: true,
+    persistentCache: {
+      key: gradesSummaryPersistentCacheKey,
+      maxAgeMs: 30 * 24 * 60 * 60 * 1000,
+    },
+    getErrorMessage: (requestError) =>
+      getApiErrorMessage(
+        requestError,
+        'Не удалось обновить рейтинг по успеваемости.',
       ),
   })
   const {
@@ -260,6 +399,10 @@ export const StudyPage = () => {
         'Не удалось загрузить пропуски по неуважительной причине.',
       ),
   })
+  const reloadGrades = useCallback(() => {
+    reload()
+    reloadSummary()
+  }, [reload, reloadSummary])
 
   const displayMessage = hasStudentCardNumber
     ? error
@@ -267,13 +410,21 @@ export const StudyPage = () => {
   const blockingDisplayMessage = !hasData ? displayMessage : null
   const refreshError = hasData ? error : null
   const canRenderResults = hasStudentCardNumber && hasData
-  const summary = data?.summary
+  const summary = useMemo(
+    () => mergeGradesSummary(data?.summary, summaryData?.summary),
+    [data?.summary, summaryData?.summary],
+  )
   const subjects = data?.subjects ?? EMPTY_SUBJECTS
   const omissionMonths = omissionsData?.months ?? EMPTY_OMISSION_MONTHS
   const omissionSubjects =
     omissionsData?.subjects ?? EMPTY_OMISSION_SUBJECTS
   const omissionTotalHours = omissionsData?.totalHours ?? 0
-  const warning = data?.warning
+  const warning =
+    data?.warning ??
+    summaryData?.warning ??
+    (summaryError && hasData && summary?.position === undefined
+      ? summaryError
+      : undefined)
   const omissionsSetupMessage = hasIisCredentials
     ? null
     : normalizedIisLogin.length > 0
@@ -293,6 +444,44 @@ export const StudyPage = () => {
     },
     [subjects],
   )
+  const progressMarkColumns = useMemo(() => {
+    const hasOtherMarks = subjectSummaries.some((subject) =>
+      subject.markGroups.some((group) => group.key === 'other'),
+    )
+
+    return hasOtherMarks
+      ? [...BASE_PROGRESS_MARK_COLUMNS, OTHER_PROGRESS_MARK_COLUMN]
+      : BASE_PROGRESS_MARK_COLUMNS
+  }, [subjectSummaries])
+  const openedProgressCellId = useMemo(() => {
+    if (activeProgressCellId === null) {
+      return null
+    }
+
+    const hasActiveCell = subjectSummaries.some((subject) =>
+      progressMarkColumns.some(
+        (column) => `${subject.id}:${column.key}` === activeProgressCellId,
+      ),
+    )
+
+    return hasActiveCell ? activeProgressCellId : null
+  }, [activeProgressCellId, progressMarkColumns, subjectSummaries])
+  const studyUpdatedAt =
+    updatedAt === null
+      ? summaryUpdatedAt
+      : summaryUpdatedAt === null
+        ? updatedAt
+        : Math.max(updatedAt, summaryUpdatedAt)
+  const isSummaryPending =
+    canLoadGradesSummary &&
+    !hasSummaryData &&
+    (isSummaryInitialLoading || isSummaryRefreshing)
+  const isPositionLoading =
+    isInitialLoading ||
+    (summary?.position === undefined && isSummaryPending)
+  const isSpecialityLoading =
+    isInitialLoading ||
+    (summary?.speciality === undefined && isSummaryPending)
   const specialityLabel =
     summary?.speciality ?? 'Специальность не определена'
   const positionLabel = summary?.position ?? '—'
@@ -301,11 +490,13 @@ export const StudyPage = () => {
     ? `Группа ${normalizedGroupNumber}`
     : 'Группа не указана'
   const studyStatusLabel = isRefreshing
-    ? 'Обновляем данные'
+    ? 'Обновляем оценки'
+    : isSummaryRefreshing
+      ? 'Уточняем рейтинг'
     : refreshError
       ? 'Показаны сохраненные данные'
       : 'Оценки / рейтинг'
-  const studyStatusTone = isRefreshing
+  const studyStatusTone = isRefreshing || isSummaryRefreshing
     ? 'loading'
     : refreshError
       ? 'warning'
@@ -320,6 +511,43 @@ export const StudyPage = () => {
     : omissionsError && hasOmissionsData
       ? 'warning'
       : 'neutral'
+
+  useEffect(() => {
+    if (openedProgressCellId === null) {
+      return undefined
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target
+      if (!(target instanceof Element)) {
+        return
+      }
+
+      const progressCell = target.closest('[data-progress-cell-id]')
+      if (
+        progressCell?.getAttribute('data-progress-cell-id') ===
+        openedProgressCellId
+      ) {
+        return
+      }
+
+      setActiveProgressCellId(null)
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setActiveProgressCellId(null)
+      }
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [openedProgressCellId])
 
   if (role !== 'student') {
     return (
@@ -364,7 +592,7 @@ export const StudyPage = () => {
             <span className="study-student-badge">Студент</span>
             <DataRefreshBadge
               label={studyStatusLabel}
-              updatedAt={updatedAt}
+              updatedAt={studyUpdatedAt}
               tone={studyStatusTone}
             />
           </div>
@@ -381,7 +609,7 @@ export const StudyPage = () => {
             <span className="study-speciality-label">Специальность</span>
             <h2 className="study-speciality-value">
               <StudyMetricValue
-                isLoading={isInitialLoading}
+                isLoading={isSpecialityLoading}
                 value={specialityLabel}
                 className="study-inline-skeleton--speciality"
               />
@@ -400,7 +628,7 @@ export const StudyPage = () => {
                 </span>
                 <strong className="study-metric-value study-metric-value--hero">
                   <StudyMetricValue
-                    isLoading={isInitialLoading}
+                    isLoading={isPositionLoading}
                     value={positionLabel}
                     className="study-inline-skeleton--hero-metric"
                   />
@@ -553,7 +781,7 @@ export const StudyPage = () => {
               <button
                 type="button"
                 className="study-retry-button"
-                onClick={reload}
+                onClick={reloadGrades}
               >
                 Повторить запрос
               </button>
@@ -592,169 +820,206 @@ export const StudyPage = () => {
               </section>
             )}
 
-            <section className="study-subjects-section">
-              <div className="study-subjects-heading">
-                <h2 className="study-section-title">
-                  Оценки и пропуски по предметам
-                </h2>
-                <p className="study-subjects-caption">
-                  В одной строке собраны средний балл, часы пропусков и
-                  все оценки по дисциплине.
-                </p>
+            <section className="study-progress-section">
+              <div className="study-progress-header">
+                <div>
+                  <h2 className="study-section-title">
+                    Оценки и пропуски по предметам
+                  </h2>
+                  <p className="study-progress-note">
+                    Таблица собрана по типам занятий. Нажмите на ячейку с
+                    количеством оценок, чтобы увидеть сами оценки.
+                  </p>
+                </div>
               </div>
 
               {subjectSummaries.length > 0 ? (
-                <div className="study-subjects-table-card">
-                  <div
-                    className="study-subjects-table-head"
-                    aria-hidden="true"
-                  >
-                    <span className="study-subjects-table-head-label">
-                      Предмет
-                    </span>
-                    <span className="study-subjects-table-head-label">
-                      Преподаватель
-                    </span>
-                    <span className="study-subjects-table-head-label">
-                      Средний
-                    </span>
-                    <span className="study-subjects-table-head-label">
-                      Пропуски
-                    </span>
-                    <span className="study-subjects-table-head-label">
-                      Оценки
-                    </span>
-                  </div>
-
-                  <div className="study-subjects-table-body">
-                  {subjectSummaries.map((subject) => {
-                    const subjectOmissionCount = resolveSubjectOmissionCount(
-                      subject.subject,
-                      omissionSubjectLookup,
-                    )
-                    const omissionTone = getOmissionTone(
-                      subjectOmissionCount,
-                    )
-                    const averageTone = getAverageTone(subject.average)
-
-                    return (
-                      <article
-                        key={subject.id}
-                        className="study-subject-row"
-                      >
-                        <div
-                          className="study-subject-cell study-subject-cell--subject"
-                          data-label="Предмет"
-                        >
-                          <h3 className="study-subject-row-title">
-                            {subject.subject}
-                          </h3>
-                        </div>
-
-                        <div
-                          className="study-subject-cell study-subject-cell--teacher"
-                          data-label="Преподаватель"
-                        >
-                          <p
-                            className={`study-subject-row-teacher${
-                              subject.teacher
-                                ? ''
-                                : ' study-subject-row-teacher--muted'
-                            }`}
+                <div className="study-progress-table-shell">
+                  <div className="study-progress-table-scroll">
+                    <table className="study-progress-table">
+                      <thead>
+                        <tr>
+                          <th
+                            rowSpan={2}
+                            className="study-progress-index-head"
                           >
-                            {subject.teacher ?? 'Не указан'}
-                          </p>
-                        </div>
-
-                        <div
-                          className="study-subject-cell study-subject-cell--metric"
-                          data-label="Средний"
-                        >
-                          <div
-                            className={`study-subject-stat study-subject-stat--${averageTone}`}
+                            №
+                          </th>
+                          <th
+                            rowSpan={2}
+                            className="study-progress-subject-head-cell"
                           >
-                            <strong className="study-subject-stat-value">
-                              {subject.average?.toFixed(1) ?? '—'}
-                            </strong>
-                          </div>
-                          <span className="study-subject-stat-note">
-                            {subject.marksCount > 0
-                              ? `${subject.marksCount} ${formatMarksLabel(subject.marksCount)}`
-                              : 'Оценок пока нет'}
-                          </span>
-                        </div>
-
-                        <div
-                          className="study-subject-cell study-subject-cell--metric"
-                          data-label="Пропуски"
-                        >
-                          <div
-                            className={`study-subject-stat study-subject-stat--${omissionTone}`}
-                          >
-                            <strong className="study-subject-stat-value">
-                              {subjectOmissionCount === undefined
-                                ? '—'
-                                : `${subjectOmissionCount} ч.`}
-                            </strong>
-                          </div>
-                          <span className="study-subject-stat-note">
-                            {subjectOmissionCount === undefined
-                              ? 'Нет данных из IIS'
-                              : subjectOmissionCount === 0
-                                ? 'Без пропусков'
-                                : 'Неуважительные часы'}
-                          </span>
-                        </div>
-
-                        <div
-                          className="study-subject-cell study-subject-cell--marks"
-                          data-label="Оценки"
-                        >
-                          {subject.marks.length > 0 ? (
-                            subject.hasTypedMarks ? (
-                              <div className="study-mark-groups">
-                                {subject.markGroups.map((group) => (
-                                  <div
-                                    key={`${subject.id}:${group.key}`}
-                                    className="study-mark-group"
-                                  >
-                                    <span className="study-mark-group-label">
-                                      {group.label}
-                                    </span>
-                                    <div className="study-marks-row">
-                                      {group.marks.map((mark, index) => (
-                                        <span
-                                          key={`${subject.id}:${group.key}:${index}:${mark.value}`}
-                                          className={`study-mark-badge study-mark-badge--${getMarkTone(mark.value)}`}
-                                        >
-                                          {mark.value}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <div className="study-marks-row">
-                                {subject.marks.map((mark, index) => (
-                                  <span
-                                    key={`${subject.id}:${index}:${mark.value}`}
-                                    className={`study-mark-badge study-mark-badge--${getMarkTone(mark.value)}`}
-                                  >
-                                    {mark.value}
-                                  </span>
-                                ))}
-                              </div>
-                            )
-                          ) : (
-                            <span className="study-no-marks">
-                              Оценок пока нет
+                            Предмет
+                          </th>
+                          <th colSpan={progressMarkColumns.length}>
+                            <span className="study-progress-total-head-inner">
+                              Контрольные точки
                             </span>
-                          )}
-                        </div>
-                      </article>
-                    )
-                  })}
+                          </th>
+                          <th rowSpan={2}>Пропуски</th>
+                        </tr>
+                        <tr>
+                          {progressMarkColumns.map((column) => (
+                            <th
+                              key={`study-progress-head:${column.key}`}
+                              className="study-progress-kind-head"
+                            >
+                              {column.label}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+
+                      <tbody>
+                        {subjectSummaries.map((subject, index) => {
+                          const subjectOmissionCount =
+                            resolveSubjectOmissionCount(
+                              subject.subject,
+                              omissionSubjectLookup,
+                            )
+                          const omissionTone =
+                            getOmissionCellTone(subjectOmissionCount)
+
+                          return (
+                            <tr key={subject.id}>
+                              <td className="study-progress-index-cell">
+                                {index + 1}
+                              </td>
+                              <td className="study-progress-subject-cell">
+                                <div className="study-progress-subject-copy">
+                                  <strong className="study-progress-subject-name">
+                                    {subject.subject}
+                                  </strong>
+                                  <span className="study-progress-subject-teacher">
+                                    {subject.teacher ??
+                                      'Преподаватель не указан'}
+                                  </span>
+                                  <span className="study-progress-subject-meta">
+                                    {subject.average?.toFixed(1) ?? '—'} ср. ·{' '}
+                                    {subject.marksCount}{' '}
+                                    {formatMarksLabel(subject.marksCount)}
+                                  </span>
+                                </div>
+                              </td>
+
+                              {progressMarkColumns.map((column, columnIndex) => {
+                                const markGroup = getProgressMarkGroup(
+                                  subject,
+                                  column.key,
+                                )
+                                const marks = markGroup?.marks ?? []
+                                const cellId = `${subject.id}:${column.key}`
+                                const isActive =
+                                  openedProgressCellId === cellId
+                                const tone = getProgressCellTone(marks)
+                                const popoverAlignmentClass =
+                                  getPopoverAlignmentClass(
+                                    columnIndex,
+                                    progressMarkColumns.length,
+                                  )
+
+                                return (
+                                  <td
+                                    key={`${subject.id}:${column.key}`}
+                                    className="study-progress-value-cell"
+                                  >
+                                    <div
+                                      className="study-progress-cell-wrap"
+                                      data-progress-cell-id={cellId}
+                                    >
+                                      {marks.length > 0 ? (
+                                        <button
+                                          type="button"
+                                          className={`study-progress-cell-button study-progress-cell-button--${tone}${
+                                            isActive
+                                              ? ' study-progress-cell-button--active'
+                                              : ''
+                                          }`}
+                                          aria-expanded={isActive}
+                                          aria-label={`${subject.subject}, ${column.label}: ${marks.length} ${formatMarksLabel(marks.length)}`}
+                                          onClick={() =>
+                                            setActiveProgressCellId((current) =>
+                                              current === cellId
+                                                ? null
+                                                : cellId,
+                                            )
+                                          }
+                                        >
+                                          <span className="study-progress-cell-count">
+                                            {marks.length} шт.
+                                          </span>
+                                          <span className="study-progress-cell-hours">
+                                            {formatProgressCellMeta(marks)}
+                                          </span>
+                                        </button>
+                                      ) : (
+                                        <div className="study-progress-cell-button study-progress-cell-button--muted study-progress-cell-button--static">
+                                          <span className="study-progress-cell-count">
+                                            0 шт.
+                                          </span>
+                                          <span className="study-progress-cell-hours">
+                                            нет оценок
+                                          </span>
+                                        </div>
+                                      )}
+
+                                      {isActive && (
+                                        <div
+                                          className={`study-progress-popover ${popoverAlignmentClass}`.trim()}
+                                        >
+                                          <span className="study-progress-popover-label">
+                                            {subject.subject} · {column.label}
+                                          </span>
+                                          <div className="study-progress-popover-list">
+                                            {marks.map((mark, markIndex) => (
+                                              <div
+                                                key={`${subject.id}:${column.key}:${markIndex}:${mark.value}`}
+                                                className="study-progress-popover-item"
+                                              >
+                                                <span
+                                                  className={`study-mark-badge study-mark-badge--${getMarkTone(mark.value)}`}
+                                                >
+                                                  {formatProgressMarkValue(
+                                                    mark.value,
+                                                  )}
+                                                </span>
+                                                <span className="study-progress-popover-item-text">
+                                                  {mark.date ??
+                                                    `Оценка ${markIndex + 1}`}
+                                                </span>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </td>
+                                )
+                              })}
+
+                              <td className="study-progress-value-cell">
+                                <div className="study-progress-cell-wrap">
+                                  <div
+                                    className={`study-progress-cell-button study-progress-cell-button--${omissionTone} study-progress-cell-button--static`}
+                                  >
+                                    <span className="study-progress-cell-count">
+                                      {subjectOmissionCount === undefined
+                                        ? '—'
+                                        : `${subjectOmissionCount} ч.`}
+                                    </span>
+                                    <span className="study-progress-cell-hours">
+                                      {getOmissionCellMeta(
+                                        subjectOmissionCount,
+                                      )}
+                                    </span>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               ) : (

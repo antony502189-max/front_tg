@@ -209,6 +209,7 @@ function App() {
       markProfileBootstrapped: state.markProfileBootstrapped,
     })),
   )
+  const hasLocalProfile = isOnboarded && role !== null
 
   useEffect(() => {
     const root = document.documentElement
@@ -231,6 +232,12 @@ function App() {
       theme.isDark ? 'dark' : 'light',
     )
   }, [theme])
+
+  useEffect(() => {
+    if (!isProfileBootstrapped && hasLocalProfile) {
+      markProfileBootstrapped()
+    }
+  }, [hasLocalProfile, isProfileBootstrapped, markProfileBootstrapped])
 
   useEffect(() => {
     const controller = new AbortController()

@@ -1,5 +1,8 @@
 import { apiGet, LONG_API_TIMEOUT_MS } from './client'
-import type { GradesResponse } from '../types/grades'
+import type {
+  GradesResponse,
+  GradesSummary,
+} from '../types/grades'
 
 export type {
   GradeMark,
@@ -9,6 +12,7 @@ export type {
 } from '../types/grades'
 
 const GRADES_API_TIMEOUT_MS = LONG_API_TIMEOUT_MS * 3
+const GRADES_SUMMARY_API_TIMEOUT_MS = LONG_API_TIMEOUT_MS * 2
 
 const toNumber = (value: unknown): number | undefined => {
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -109,23 +113,16 @@ const normalizeSummary = (payload: Record<string, unknown>) => {
 export async function fetchGrades(
   studentCardNumber: string,
   options: {
-    groupNumber?: string
     signal?: AbortSignal
   } = {},
 ): Promise<GradesResponse> {
-  const { groupNumber, signal } = options
+  const { signal } = options
   const normalizedStudentCardNumber = studentCardNumber.trim()
-  const normalizedGroupNumber = groupNumber?.trim()
-  const params: Record<string, string> = {}
-
-  if (normalizedGroupNumber) {
-    params.studentGroup = normalizedGroupNumber
-  }
 
   const payload = await apiGet<GradesResponse & Record<string, unknown>>(
-    `/rating/${encodeURIComponent(normalizedStudentCardNumber)}`,
+    '/grades',
     {
-      params,
+      params: { studentCardNumber: normalizedStudentCardNumber },
       timeout: GRADES_API_TIMEOUT_MS,
       signal,
       cacheTtlMs: 60_000,
@@ -134,6 +131,44 @@ export async function fetchGrades(
 
   return {
     ...payload,
+    summary: normalizeSummary(payload),
+  }
+}
+
+export type GradesSummaryResponse = {
+  summary?: GradesSummary
+  warning?: string
+}
+
+export async function fetchGradesSummary(
+  studentCardNumber: string,
+  options: {
+    groupNumber?: string
+    signal?: AbortSignal
+  } = {},
+): Promise<GradesSummaryResponse> {
+  const { groupNumber, signal } = options
+  const normalizedStudentCardNumber = studentCardNumber.trim()
+  const normalizedGroupNumber = groupNumber?.trim()
+  const params: Record<string, string> = {
+    studentCardNumber: normalizedStudentCardNumber,
+  }
+
+  if (normalizedGroupNumber) {
+    params.studentGroup = normalizedGroupNumber
+  }
+
+  const payload = await apiGet<
+    GradesSummaryResponse & Record<string, unknown>
+  >('/rating-summary', {
+    params,
+    timeout: GRADES_SUMMARY_API_TIMEOUT_MS,
+    signal,
+    cacheTtlMs: 60_000,
+  })
+
+  return {
+    warning: toString(payload.warning),
     summary: normalizeSummary(payload),
   }
 }

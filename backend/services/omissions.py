@@ -98,6 +98,9 @@ class OmissionsService:
             try:
                 return loader(normalized_username, normalized_password)
             except Exception as error:
+                if not isinstance(error, self.upstream_error_cls):
+                    raise
+
                 last_error = error
                 status = getattr(error, "status", None)
                 should_retry = status is None or status == 429 or status >= 500
@@ -154,7 +157,9 @@ class OmissionsService:
         grade_book = None
         try:
             grade_book = self._request_json(opener, "/grade-book")
-        except Exception:
+        except Exception as error:
+            if not isinstance(error, self.upstream_error_cls):
+                raise
             grade_book = None
 
         return {
@@ -192,7 +197,12 @@ class OmissionsService:
                 charset = response.headers.get_content_charset() or "utf-8"
                 raw_body = response.read()
                 decoded = raw_body.decode(charset, errors="ignore")
-                return json.loads(decoded) if decoded else None
+                try:
+                    return json.loads(decoded) if decoded else None
+                except json.JSONDecodeError as error:
+                    raise self.upstream_error_cls(
+                        "Upstream API returned invalid JSON"
+                    ) from error
         except HTTPError as error:
             if path == "/auth/login" and error.code in {401, 403}:
                 raise self.upstream_error_cls(

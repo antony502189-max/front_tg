@@ -9,7 +9,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from threading import Lock
+from threading import Lock, Thread
 from typing import Any, Callable, Mapping
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, urlencode, urlparse
@@ -110,6 +110,10 @@ GRADES_SEARCH_TIMEOUT_MS = 4_000
 GRADES_RATING_LIST_TIMEOUT_MS = 60_000
 EMPLOYEE_SEARCH_TIMEOUT_MS = 4_000
 RATING_DIRECTORY_CACHE_TTL_MS = 3_600_000
+CACHE_PRUNE_INTERVAL_MS = 60_000
+MAX_REQUEST_BODY_BYTES = 1_048_576
+INVALID_CONTENT_LENGTH_MESSAGE = "Invalid Content-Length header"
+REQUEST_BODY_TOO_LARGE_MESSAGE = "Request body is too large"
 TIMEOUT_ERROR_MARKERS = (
     "timed out",
     "timeout",
@@ -141,6 +145,7 @@ LESSON_TYPE_ALIASES = {
     "лабораторная": "lab",
 }
 GRADES_EXECUTOR = ThreadPoolExecutor(max_workers=4)
+UPSTREAM_EXECUTOR = ThreadPoolExecutor(max_workers=6)
 
 
 def load_config() -> AppConfig:
@@ -236,6 +241,10 @@ class UpstreamRequestError(Exception):
         super().__init__(message)
         self.message = message
         self.status = status
+
+
+class RequestBodyTooLargeError(Exception):
+    pass
 
 
 def cache_key(path: str, params: dict[str, str]) -> str:
@@ -2117,6 +2126,23 @@ def normalize_grades_response(
     return response
 
 
+def normalize_rating_summary_response(
+    student_card_number: str,
+    search_payload: Any,
+    extra_summary: Mapping[str, Any] | None = None,
+    warning: str | None = None,
+) -> dict[str, Any]:
+    matched_student = find_student_card_match(search_payload, student_card_number)
+    search_summary = extract_grade_summary(matched_student)
+    summary = merge_grade_summaries(extra_summary, search_summary)
+    response = {"summary": summary}
+
+    if warning is not None:
+        response["warning"] = warning
+
+    return response
+
+
 
 def _coerce_non_negative_int(value: Any) -> int:
     if isinstance(value, bool):
@@ -2329,6 +2355,8 @@ class BackendApp:
         )
         self._inflight_requests: dict[str, Future[JsonValue]] = {}
         self._timeout_fetchers: dict[int, Fetcher] = {}
+        self._telegram_webhook_setup_started = False
+        self._cache_prune_due_ms = 0
         self.rating_service = RatingService(
             request_upstream=self.request_upstream,
             request_upstream_with_timeout=lambda path, params, timeout_ms, max_retries: self.request_upstream_with_timeout(
@@ -2371,13 +2399,44 @@ class BackendApp:
 
     def cache_entries(self) -> int:
         with self.lock:
+            self._prune_expired_response_cache_unlocked(self.now_ms())
             return len(self.store)
 
     def configure_telegram_webhook(self) -> None:
-        if self.telegram_bot_app is None or self.telegram_bot_app.is_configured:
+        if not self._try_begin_telegram_webhook_setup():
             return
 
+        self._configure_telegram_webhook_task()
+
+    def configure_telegram_webhook_in_background(self) -> None:
+        if not self._try_begin_telegram_webhook_setup():
+            return
+
+        Thread(
+            target=self._configure_telegram_webhook_task,
+            name="telegram-webhook-setup",
+            daemon=True,
+        ).start()
+
+    def _try_begin_telegram_webhook_setup(self) -> bool:
+        with self.lock:
+            return self._try_begin_telegram_webhook_setup_locked()
+
+    def _try_begin_telegram_webhook_setup_locked(self) -> bool:
+        if self.telegram_bot_app is None or self.telegram_bot_app.is_configured:
+            return False
+
+        if self._telegram_webhook_setup_started:
+            return False
+
+        self._telegram_webhook_setup_started = True
+        return True
+
+    def _configure_telegram_webhook_task(self) -> None:
         try:
+            if self.telegram_bot_app is None:
+                return
+
             self.telegram_bot_app.ensure_webhook_setup()
             print(
                 "[telegram-webhook] configured at "
@@ -2385,6 +2444,9 @@ class BackendApp:
             )
         except TelegramBotError as error:
             print(f"[telegram-webhook] setup error: {error.message}")
+        finally:
+            with self.lock:
+                self._telegram_webhook_setup_started = False
 
     def request_upstream(self, path: str, params: dict[str, str]) -> JsonValue:
         return fetch_with_retry(
@@ -2509,26 +2571,43 @@ class BackendApp:
     ) -> JsonValue:
         today_value = self.today()
         normalized_view = normalize_schedule_view(view)
+        schedule_future: Future[JsonValue] | None = None
+        current_week_future: Future[int] | None = None
 
-        if student_group is not None:
-            schedule_payload = self.request_upstream(
-                "/schedule",
-                {"studentGroup": student_group},
+        try:
+            current_week_future = UPSTREAM_EXECUTOR.submit(
+                self._fetch_current_week
             )
-        elif teacher_url_id is not None:
-            schedule_payload = self._request_teacher_schedule(
-                teacher_url_id,
-                teacher_employee_id,
-            )
-        else:
-            raise UpstreamRequestError(
-                "Either studentGroup or teacherUrlId is required",
-                status=400,
-            )
+
+            if student_group is not None:
+                schedule_future = UPSTREAM_EXECUTOR.submit(
+                    self.request_upstream,
+                    "/schedule",
+                    {"studentGroup": student_group},
+                )
+            elif teacher_url_id is not None:
+                schedule_future = UPSTREAM_EXECUTOR.submit(
+                    self._request_teacher_schedule,
+                    teacher_url_id,
+                    teacher_employee_id,
+                )
+            else:
+                raise UpstreamRequestError(
+                    "Either studentGroup or teacherUrlId is required",
+                    status=400,
+                )
+
+            schedule_payload = schedule_future.result()
+            current_week = current_week_future.result()
+        finally:
+            if schedule_future is not None:
+                schedule_future.cancel()
+            if current_week_future is not None:
+                current_week_future.cancel()
 
         return normalize_schedule_response(
             schedule_payload,
-            self._fetch_current_week(),
+            current_week,
             today_value,
             reference_date=reference_date or today_value,
             view=normalized_view,
@@ -2762,6 +2841,67 @@ class BackendApp:
 
         return normalize_omissions_response(raw_payload)
 
+    def _build_rating_summary_payload(
+        self,
+        query_value: str,
+        *,
+        student_group: str | None = None,
+    ) -> JsonValue:
+        search_payload = None
+        search_error: UpstreamRequestError | None = None
+        summary_error: UpstreamRequestError | None = None
+
+        futures = {
+            "search": GRADES_EXECUTOR.submit(
+                self._request_grades_search,
+                query_value,
+            ),
+            "summary": GRADES_EXECUTOR.submit(
+                self._find_student_rating_summary,
+                query_value,
+                student_group,
+            ),
+        }
+
+        extra_summary = None
+        for key, future in futures.items():
+            try:
+                result = future.result()
+            except UpstreamRequestError as error:
+                if key == "search":
+                    search_error = error
+                else:
+                    summary_error = error
+                continue
+
+            if key == "search":
+                search_payload = result
+            else:
+                extra_summary = result
+
+        if search_payload is None and extra_summary is None:
+            if search_error is not None and search_error.status == 404:
+                raise search_error
+            if summary_error is not None:
+                raise summary_error
+            if search_error is not None:
+                raise search_error
+
+        warning = None
+        if extra_summary is None:
+            warning = (
+                search_error.message
+                if search_error is not None and search_error.status == 404
+                else summary_error.message if summary_error is not None else None
+            )
+
+        return normalize_rating_summary_response(
+            query_value,
+            search_payload,
+            extra_summary=extra_summary,
+            warning=warning,
+        )
+
     def build_route_payload(self, route: RouteConfig, query_value: str) -> JsonValue:
         builder = self._route_payload_builders.get(route.kind)
 
@@ -2977,6 +3117,28 @@ class BackendApp:
             ),
         )
 
+    def _handle_rating_summary_request(self, parsed_url: Any) -> Response:
+        student_card_number = first_query_value(parsed_url, "studentCardNumber")
+        if student_card_number is None:
+            return Response(
+                400,
+                {"error": 'Query param "studentCardNumber" is required'},
+            )
+
+        student_group = first_query_value(parsed_url, "studentGroup")
+        params = {"studentCardNumber": student_card_number}
+        if student_group is not None:
+            params["studentGroup"] = student_group
+
+        key = cache_key("/rating-summary", params)
+        return self._serve_cached_payload(
+            key,
+            lambda: self._build_rating_summary_payload(
+                student_card_number,
+                student_group=student_group,
+            ),
+        )
+
     def _handle_employee_search_request(self, parsed_url: Any) -> Response:
         query_value = first_query_value(parsed_url, "query", "q")
         if query_value is None or len(query_value) < 2:
@@ -3062,22 +3224,40 @@ class BackendApp:
 
     def _read_fresh_cache(self, key: str, now_value: int) -> JsonValue | None:
         with self.lock:
+            self._prune_expired_response_cache_unlocked(now_value)
             return read_fresh_cache(self.store, key, now_value)
 
     def _read_stale_cache(self, key: str, now_value: int) -> JsonValue | None:
         with self.lock:
+            self._prune_expired_response_cache_unlocked(now_value)
             return read_stale_cache(self.store, key, now_value)
 
     def _write_cached_payload(self, key: str, payload: JsonValue) -> None:
         with self.lock:
+            now_value = self.now_ms()
+            self._prune_expired_response_cache_unlocked(now_value)
             write_cache(
                 self.store,
                 key,
                 payload,
                 self.config.cache_ttl_ms,
                 self.config.stale_ttl_ms,
-                self.now_ms(),
+                now_value,
             )
+
+    def _prune_expired_response_cache_unlocked(self, now_value: int) -> None:
+        if now_value < self._cache_prune_due_ms:
+            return
+
+        expired_keys = [
+            key
+            for key, entry in self.store.items()
+            if now_value > entry.stale_until
+        ]
+        for key in expired_keys:
+            self.store.pop(key, None)
+
+        self._cache_prune_due_ms = now_value + CACHE_PRUNE_INTERVAL_MS
 
     def _get_or_create_inflight_request(
         self,
@@ -3114,6 +3294,9 @@ class BackendApp:
     ) -> Response:
         if raw_path is None:
             return Response(400, {"error": "Bad request"})
+
+        if body is not None and len(body) > MAX_REQUEST_BODY_BYTES:
+            return Response(413, {"error": REQUEST_BODY_TOO_LARGE_MESSAGE})
 
         parsed_url = urlparse(raw_path)
 
@@ -3162,6 +3345,9 @@ class BackendApp:
 
         if parsed_url.path == "/api/grades":
             return self._handle_grades_request(parsed_url)
+
+        if parsed_url.path == "/api/rating-summary":
+            return self._handle_rating_summary_request(parsed_url)
 
         if parsed_url.path.startswith("/api/rating/"):
             return self._handle_rating_request(parsed_url)
@@ -3262,8 +3448,13 @@ def build_headers_from_scope(scope: Mapping[str, Any]) -> dict[str, str]:
     return headers
 
 
-async def read_request_body(receive: Any) -> bytes:
+async def read_request_body(
+    receive: Any,
+    *,
+    max_bytes: int = MAX_REQUEST_BODY_BYTES,
+) -> bytes:
     chunks: list[bytes] = []
+    total_size = 0
 
     while True:
         message = await receive()
@@ -3272,6 +3463,9 @@ async def read_request_body(receive: Any) -> bytes:
 
         body = message.get("body", b"")
         if isinstance(body, bytes) and body:
+            total_size += len(body)
+            if total_size > max_bytes:
+                raise RequestBodyTooLargeError
             chunks.append(body)
 
         if not message.get("more_body", False):
@@ -3288,7 +3482,7 @@ class BackendASGIApp:
             message_type = message.get("type")
 
             if message_type == "lifespan.startup":
-                self.backend_app.configure_telegram_webhook()
+                self.backend_app.configure_telegram_webhook_in_background()
                 await send({"type": "lifespan.startup.complete"})
                 continue
 
@@ -3306,7 +3500,26 @@ class BackendASGIApp:
         if scope_type != "http":
             return
 
-        body_bytes = await read_request_body(receive)
+        try:
+            body_bytes = await read_request_body(receive)
+        except RequestBodyTooLargeError:
+            response = Response(413, {"error": REQUEST_BODY_TOO_LARGE_MESSAGE})
+            body = encode_response_body(response)
+            method = str(scope.get("method") or "GET")
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": response.status_code,
+                    "headers": encode_response_headers(response, body),
+                }
+            )
+            await send(
+                {
+                    "type": "http.response.body",
+                    "body": b"" if method == "HEAD" else body,
+                }
+            )
+            return
 
         method = str(scope.get("method") or "GET")
         response = self.backend_app.handle_request(
@@ -3338,19 +3551,7 @@ def create_asgi_app(backend_app: BackendApp | None = None) -> BackendASGIApp:
 
 def create_handler(app: BackendApp) -> type[BaseHTTPRequestHandler]:
     class RequestHandler(BaseHTTPRequestHandler):
-        def respond(self) -> None:
-            content_length = int(self.headers.get("Content-Length", "0") or "0")
-            body = self.rfile.read(content_length) if content_length > 0 else b""
-            headers = {
-                key.lower(): value
-                for key, value in self.headers.items()
-            }
-            response = app.handle_request(
-                self.command,
-                self.path,
-                body=body,
-                headers=headers,
-            )
+        def _send_backend_response(self, response: Response) -> None:
             self.send_response(response.status_code)
 
             for key, value in CORS_HEADERS.items():
@@ -3368,6 +3569,41 @@ def create_handler(app: BackendApp) -> type[BaseHTTPRequestHandler]:
 
             if self.command != "HEAD":
                 self.wfile.write(body)
+
+        def respond(self) -> None:
+            raw_content_length = self.headers.get("Content-Length", "0") or "0"
+            try:
+                content_length = int(raw_content_length)
+            except ValueError:
+                self._send_backend_response(
+                    Response(400, {"error": INVALID_CONTENT_LENGTH_MESSAGE})
+                )
+                return
+
+            if content_length < 0:
+                self._send_backend_response(
+                    Response(400, {"error": INVALID_CONTENT_LENGTH_MESSAGE})
+                )
+                return
+
+            if content_length > MAX_REQUEST_BODY_BYTES:
+                self._send_backend_response(
+                    Response(413, {"error": REQUEST_BODY_TOO_LARGE_MESSAGE})
+                )
+                return
+
+            body = self.rfile.read(content_length) if content_length > 0 else b""
+            headers = {
+                key.lower(): value
+                for key, value in self.headers.items()
+            }
+            response = app.handle_request(
+                self.command,
+                self.path,
+                body=body,
+                headers=headers,
+            )
+            self._send_backend_response(response)
 
         def do_OPTIONS(self) -> None:  # noqa: N802
             self.respond()

@@ -19,6 +19,8 @@ LOGGER = logging.getLogger(__name__)
 GRADES_SEARCH_TIMEOUT_MS = 4_000
 GRADES_RATING_LIST_TIMEOUT_MS = 60_000
 RATING_DIRECTORY_CACHE_TTL_MS = 3_600_000
+RATING_SUMMARY_CACHE_TTL_MS = 300_000
+RATING_CACHE_PRUNE_INTERVAL_MS = 60_000
 TIMEOUT_ERROR_MARKERS = (
     "timed out",
     "timeout",
@@ -441,9 +443,19 @@ class RatingService:
         self._rating_speciality_index: list[dict[str, str]] = []
         self._rating_speciality_index_fresh_until = 0
         self._rating_courses_cache: dict[tuple[str, str], tuple[int, list[int]]] = {}
+        self._group_info_cache: dict[str, tuple[int, bool, dict[str, Any] | None]] = {}
+        self._group_rating_summary_cache: dict[
+            tuple[str, str, bool],
+            tuple[int, bool, dict[str, Any] | None],
+        ] = {}
+        self._student_card_rating_summary_cache: dict[
+            str,
+            tuple[int, bool, dict[str, Any] | None],
+        ] = {}
         self._student_card_prefix_candidates: dict[str, list[dict[str, str]]] = {}
         self._faculty_prefix_candidates: dict[str, list[str]] = {}
         self._student_card_prefix_index_fresh_until = 0
+        self._cache_prune_due_ms = 0
 
     def request_grades_search(self, student_card_number: str) -> JsonValue:
         search_path = "/rating/studentSearch"
@@ -597,6 +609,7 @@ class RatingService:
         now_value = self.now_ms()
 
         with self.lock:
+            self._prune_expired_caches_unlocked(now_value)
             cached_entry = self._rating_courses_cache.get(cache_key_value)
             if cached_entry is not None:
                 fresh_until, cached_courses = cached_entry
@@ -621,15 +634,33 @@ class RatingService:
         return courses
 
     def find_group_info(self, student_group: str) -> dict[str, Any] | None:
+        normalized_group = first_non_empty_string(student_group)
+        if normalized_group is None:
+            return None
+
+        cache_key_value = normalize_lookup_value(normalized_group)
+        cache_hit, cached_group_info = self._read_optional_mapping_cache(
+            self._group_info_cache,
+            cache_key_value,
+        )
+        if cache_hit:
+            return cached_group_info
+
         payload = self.request_upstream(
             "/student-groups/filters",
-            {"name": student_group},
+            {"name": normalized_group},
         )
         items = unwrap_value_list(payload) or payload
         if not isinstance(items, list):
+            self._write_optional_mapping_cache(
+                self._group_info_cache,
+                cache_key_value,
+                None,
+                ttl_ms=RATING_DIRECTORY_CACHE_TTL_MS,
+            )
             return None
 
-        normalized_group = normalize_lookup_value(student_group)
+        normalized_lookup = normalize_lookup_value(normalized_group)
         partial_match: dict[str, Any] | None = None
 
         for item in items:
@@ -641,13 +672,25 @@ class RatingService:
                 continue
 
             normalized_name = normalize_lookup_value(name)
-            if normalized_name == normalized_group:
-                return item
+            if normalized_name == normalized_lookup:
+                self._write_optional_mapping_cache(
+                    self._group_info_cache,
+                    cache_key_value,
+                    item,
+                    ttl_ms=RATING_DIRECTORY_CACHE_TTL_MS,
+                )
+                return dict(item)
 
-            if partial_match is None and normalized_group in normalized_name:
+            if partial_match is None and normalized_lookup in normalized_name:
                 partial_match = item
 
-        return partial_match
+        self._write_optional_mapping_cache(
+            self._group_info_cache,
+            cache_key_value,
+            partial_match,
+            ttl_ms=RATING_DIRECTORY_CACHE_TTL_MS,
+        )
+        return dict(partial_match) if isinstance(partial_match, dict) else None
 
     def find_group_rating_summary(
         self,
@@ -659,6 +702,18 @@ class RatingService:
         normalized_group = first_non_empty_string(student_group)
         if normalized_group is None:
             return None
+        normalized_student_card_number = "".join(str(student_card_number).split())
+        cache_key_value = (
+            normalized_student_card_number,
+            normalized_group,
+            allow_fallback_courses,
+        )
+        cache_hit, cached_summary = self._read_optional_mapping_cache(
+            self._group_rating_summary_cache,
+            cache_key_value,
+        )
+        if cache_hit:
+            return cached_summary
 
         try:
             group_info = self.find_group_info(normalized_group)
@@ -674,6 +729,12 @@ class RatingService:
             return None
 
         if group_info is None:
+            self._write_optional_mapping_cache(
+                self._group_rating_summary_cache,
+                cache_key_value,
+                None,
+                ttl_ms=RATING_SUMMARY_CACHE_TTL_MS,
+            )
             return None
 
         speciality_abbrev = first_non_empty_field(
@@ -686,6 +747,12 @@ class RatingService:
             {"speciality": speciality_abbrev} if speciality_abbrev is not None else None
         )
         if speciality_abbrev is None:
+            self._write_optional_mapping_cache(
+                self._group_rating_summary_cache,
+                cache_key_value,
+                None,
+                ttl_ms=RATING_SUMMARY_CACHE_TTL_MS,
+            )
             return None
 
         try:
@@ -699,6 +766,12 @@ class RatingService:
                 normalized_group,
                 error_message(error),
             )
+            self._write_optional_mapping_cache(
+                self._group_rating_summary_cache,
+                cache_key_value,
+                fallback_summary,
+                ttl_ms=RATING_SUMMARY_CACHE_TTL_MS,
+            )
             return fallback_summary
 
         speciality_candidates = [
@@ -707,6 +780,12 @@ class RatingService:
             if matches_rating_speciality(item["text"], speciality_abbrev)
         ]
         if not speciality_candidates:
+            self._write_optional_mapping_cache(
+                self._group_rating_summary_cache,
+                cache_key_value,
+                fallback_summary,
+                ttl_ms=RATING_SUMMARY_CACHE_TTL_MS,
+            )
             return fallback_summary
 
         related_candidates: list[dict[str, str]] = []
@@ -801,8 +880,20 @@ class RatingService:
                 speciality_abbrev,
                 first_non_empty_string(summary.get("speciality")),
             )
+            self._write_optional_mapping_cache(
+                self._group_rating_summary_cache,
+                cache_key_value,
+                summary,
+                ttl_ms=RATING_SUMMARY_CACHE_TTL_MS,
+            )
             return summary
 
+        self._write_optional_mapping_cache(
+            self._group_rating_summary_cache,
+            cache_key_value,
+            fallback_summary,
+            ttl_ms=RATING_SUMMARY_CACHE_TTL_MS,
+        )
         return fallback_summary
 
     def find_student_rating_summary(
@@ -846,6 +937,13 @@ class RatingService:
         if not re.fullmatch(r"\d{5,32}", normalized_student_card_number):
             return None
 
+        cache_hit, cached_summary = self._read_optional_mapping_cache(
+            self._student_card_rating_summary_cache,
+            normalized_student_card_number,
+        )
+        if cache_hit:
+            return cached_summary
+
         student_card_prefix = normalized_student_card_number[:5]
         faculty_prefix = normalized_student_card_number[:2]
 
@@ -856,6 +954,12 @@ class RatingService:
                 cached_candidates,
             )
             if summary is not None:
+                self._write_optional_mapping_cache(
+                    self._student_card_rating_summary_cache,
+                    normalized_student_card_number,
+                    summary,
+                    ttl_ms=RATING_SUMMARY_CACHE_TTL_MS,
+                )
                 return summary
 
         faculty_ids = self._get_faculty_candidates_for_prefix(faculty_prefix)
@@ -864,6 +968,12 @@ class RatingService:
             self._build_rating_candidates_for_faculties(faculty_ids),
         )
         if summary is not None:
+            self._write_optional_mapping_cache(
+                self._student_card_rating_summary_cache,
+                normalized_student_card_number,
+                summary,
+                ttl_ms=RATING_SUMMARY_CACHE_TTL_MS,
+            )
             return summary
 
         all_faculty_ids = self._get_all_faculty_ids()
@@ -871,12 +981,25 @@ class RatingService:
             faculty_id for faculty_id in all_faculty_ids if faculty_id not in faculty_ids
         ]
         if not remaining_faculty_ids:
+            self._write_optional_mapping_cache(
+                self._student_card_rating_summary_cache,
+                normalized_student_card_number,
+                None,
+                ttl_ms=RATING_SUMMARY_CACHE_TTL_MS,
+            )
             return None
 
-        return self._scan_rating_candidates(
+        summary = self._scan_rating_candidates(
             normalized_student_card_number,
             self._build_rating_candidates_for_faculties(remaining_faculty_ids),
         )
+        self._write_optional_mapping_cache(
+            self._student_card_rating_summary_cache,
+            normalized_student_card_number,
+            summary,
+            ttl_ms=RATING_SUMMARY_CACHE_TTL_MS,
+        )
+        return summary
 
     def _fetch_rating_candidate(
         self,
@@ -1093,11 +1216,86 @@ class RatingService:
             now_value + RATING_DIRECTORY_CACHE_TTL_MS
         )
 
+    def _read_optional_mapping_cache(
+        self,
+        cache: Mapping[Any, tuple[int, bool, dict[str, Any] | None]],
+        key: Any,
+    ) -> tuple[bool, dict[str, Any] | None]:
+        now_value = self.now_ms()
+
+        with self.lock:
+            self._prune_expired_caches_unlocked(now_value)
+            cached_entry = cache.get(key)
+            if cached_entry is None:
+                return False, None
+
+            fresh_until, has_value, cached_value = cached_entry
+            if now_value > fresh_until:
+                try:
+                    del cache[key]  # type: ignore[index]
+                except KeyError:
+                    pass
+                return False, None
+
+        if not has_value or cached_value is None:
+            return True, None
+
+        return True, dict(cached_value)
+
+    def _write_optional_mapping_cache(
+        self,
+        cache: dict[Any, tuple[int, bool, dict[str, Any] | None]],
+        key: Any,
+        value: Mapping[str, Any] | None,
+        *,
+        ttl_ms: int,
+    ) -> None:
+        cached_value = dict(value) if isinstance(value, Mapping) else None
+
+        with self.lock:
+            self._prune_expired_caches_unlocked(self.now_ms())
+            cache[key] = (
+                self.now_ms() + ttl_ms,
+                cached_value is not None,
+                cached_value,
+            )
+
+    def _prune_expired_caches_unlocked(self, now_value: int) -> None:
+        if now_value < self._cache_prune_due_ms:
+            return
+
+        self._prune_mapping_cache_unlocked(self._rating_courses_cache, now_value)
+        self._prune_mapping_cache_unlocked(self._group_info_cache, now_value)
+        self._prune_mapping_cache_unlocked(
+            self._group_rating_summary_cache,
+            now_value,
+        )
+        self._prune_mapping_cache_unlocked(
+            self._student_card_rating_summary_cache,
+            now_value,
+        )
+        self._cache_prune_due_ms = now_value + RATING_CACHE_PRUNE_INTERVAL_MS
+
+    @staticmethod
+    def _prune_mapping_cache_unlocked(
+        cache: dict[Any, tuple[int, Any, Any]],
+        now_value: int,
+    ) -> None:
+        expired_keys = [
+            key
+            for key, cache_entry in cache.items()
+            if now_value > cache_entry[0]
+        ]
+        for key in expired_keys:
+            cache.pop(key, None)
+
 
 __all__ = [
     "GRADES_RATING_LIST_TIMEOUT_MS",
     "GRADES_SEARCH_TIMEOUT_MS",
+    "RATING_CACHE_PRUNE_INTERVAL_MS",
     "RATING_DIRECTORY_CACHE_TTL_MS",
+    "RATING_SUMMARY_CACHE_TTL_MS",
     "RatingService",
     "StudentRatingFetchResult",
     "build_rating_list_summary",

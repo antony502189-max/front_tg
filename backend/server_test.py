@@ -8,6 +8,9 @@ from threading import Event, Lock, Thread
 from backend.server import (
     BackendApp,
     CacheEntry,
+    MAX_REQUEST_BODY_BYTES,
+    REQUEST_BODY_TOO_LARGE_MESSAGE,
+    RequestBodyTooLargeError,
     UpstreamRequestError,
     cache_key,
     create_asgi_app,
@@ -19,6 +22,7 @@ from backend.server import (
     normalize_grades_response,
     normalize_omissions_response,
     normalize_schedule_response,
+    read_request_body,
     read_fresh_cache,
     read_stale_cache,
     route_config,
@@ -399,6 +403,117 @@ class BackendServerTests(unittest.TestCase):
         self.assertIsNotNone(read_fresh_cache(store, key, 102))
         self.assertIsNotNone(read_stale_cache(store, key, 108))
         self.assertIsNone(read_stale_cache(store, key, 116))
+
+    def test_cache_entries_prunes_expired_items(self) -> None:
+        expired_key = cache_key("/grades", {"studentCardNumber": "123"})
+        fresh_key = cache_key("/grades", {"studentCardNumber": "456"})
+        store = {
+            expired_key: CacheEntry(
+                payload={"ok": False},
+                fresh_until=50,
+                stale_until=90,
+            ),
+            fresh_key: CacheEntry(
+                payload={"ok": True},
+                fresh_until=120,
+                stale_until=180,
+            ),
+        }
+        app = BackendApp(
+            config=TEST_CONFIG,
+            store=store,
+            fetcher=lambda *_: {},
+            now_ms=lambda: 100,
+        )
+
+        self.assertEqual(app.cache_entries(), 1)
+        self.assertNotIn(expired_key, store)
+        self.assertIn(fresh_key, store)
+
+    def test_handle_request_rejects_oversized_body(self) -> None:
+        app = BackendApp(config=TEST_CONFIG, fetcher=lambda *_: {})
+
+        response = app.handle_request(
+            "PUT",
+            "/api/profile",
+            body=b"x" * (MAX_REQUEST_BODY_BYTES + 1),
+        )
+
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(
+            response.payload,
+            {"error": REQUEST_BODY_TOO_LARGE_MESSAGE},
+        )
+
+    def test_read_request_body_rejects_oversized_payload(self) -> None:
+        async def receive() -> dict[str, object]:
+            messages = getattr(receive, "_messages", None)
+            if messages is None:
+                receive._messages = iter(  # type: ignore[attr-defined]
+                    [
+                        {
+                            "type": "http.request",
+                            "body": b"x" * (MAX_REQUEST_BODY_BYTES // 2),
+                            "more_body": True,
+                        },
+                        {
+                            "type": "http.request",
+                            "body": b"x" * (MAX_REQUEST_BODY_BYTES // 2 + 1),
+                            "more_body": False,
+                        },
+                    ]
+                )
+                messages = receive._messages  # type: ignore[attr-defined]
+            return next(messages)
+
+        with self.assertRaises(RequestBodyTooLargeError):
+            asyncio.run(read_request_body(receive))
+
+    def test_asgi_app_rejects_oversized_body(self) -> None:
+        backend_app = BackendApp(config=TEST_CONFIG, fetcher=lambda *_: {})
+        app = create_asgi_app(backend_app)
+        messages: list[dict[str, object]] = []
+        body_chunks = iter(
+            [
+                {
+                    "type": "http.request",
+                    "body": b"x" * (MAX_REQUEST_BODY_BYTES // 2),
+                    "more_body": True,
+                },
+                {
+                    "type": "http.request",
+                    "body": b"x" * (MAX_REQUEST_BODY_BYTES // 2 + 1),
+                    "more_body": False,
+                },
+            ]
+        )
+
+        async def receive() -> dict[str, object]:
+            return next(body_chunks)
+
+        async def send(message: dict[str, object]) -> None:
+            messages.append(message)
+
+        asyncio.run(
+            app(
+                {
+                    "type": "http",
+                    "method": "POST",
+                    "path": "/api/profile",
+                    "query_string": b"",
+                },
+                receive,
+                send,
+            )
+        )
+
+        self.assertEqual(messages[0]["type"], "http.response.start")
+        self.assertEqual(messages[0]["status"], 413)
+        self.assertEqual(messages[1]["type"], "http.response.body")
+        self.assertEqual(
+            json.loads(messages[1]["body"]),
+            {"error": REQUEST_BODY_TOO_LARGE_MESSAGE},
+        )
 
     def test_fetch_with_retry_does_not_retry_timeout_errors(self) -> None:
         attempts = {"value": 0}
@@ -1516,6 +1631,65 @@ class BackendServerTests(unittest.TestCase):
         self.assertEqual(response.payload["summary"]["position"], 2)
         self.assertEqual(response.payload["summary"]["speciality"], "CS")
         self.assertEqual(response.payload["subjects"][0]["subject"], "Math")
+
+    def test_rating_summary_route_skips_student_rating_payload(self) -> None:
+        def fetcher(path: str, params: dict[str, str]):
+            if path == "/rating/studentSearch":
+                return {"studentCardNumber": "56841006", "average": 8.4}
+
+            if path == "/rating/studentRating":
+                self.fail("rating summary route should not request student rating payload")
+
+            if path == "/student-groups/filters":
+                self.assertEqual(params, {"name": "353502"})
+                return [
+                    {
+                        "id": 1,
+                        "name": "353502",
+                        "specialityAbbrev": "CS",
+                    }
+                ]
+
+            if path == "/schedule/faculties":
+                return [{"id": 20040, "text": "Faculty"}]
+
+            if path == "/rating/specialities":
+                self.assertEqual(params, {"facultyId": "20040"})
+                return [
+                    {
+                        "id": 20655,
+                        "text": "(6-05-0611-06) CS (1 ступень дневная)",
+                    }
+                ]
+
+            if path == "/rating/courses":
+                self.assertEqual(
+                    params,
+                    {"facultyId": "20040", "specialityId": "20655"},
+                )
+                return [{"course": 3, "hasForeignPlan": False}]
+
+            if path == "/rating":
+                self.assertEqual(params, {"sdef": "20655", "course": "3"})
+                return [
+                    {"studentCardNumber": "11111111", "average": 9.1},
+                    {"studentCardNumber": "56841006", "average": 8.4},
+                ]
+
+            raise AssertionError(f"Unexpected path: {path}")
+
+        app = BackendApp(config=TEST_CONFIG, fetcher=fetcher)
+
+        response = app.handle_request(
+            "GET",
+            "/api/rating-summary?studentCardNumber=56841006&studentGroup=353502",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.payload["summary"],
+            {"average": 8.4, "position": 2, "speciality": "CS"},
+        )
 
     def test_rating_route_prefers_more_specific_speciality_name(self) -> None:
         def fetcher(path: str, params: dict[str, str]):

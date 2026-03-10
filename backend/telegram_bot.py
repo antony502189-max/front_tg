@@ -33,6 +33,7 @@ HeaderMap = Mapping[str, str]
 ALLOWED_UPDATE_TYPES = ("message",)
 WEBHOOK_PATH = "/telegram/webhook"
 START_COMMANDS = frozenset({"/start", "/app", "/help"})
+CONTROL_REQUEST_TIMEOUT_S = 10
 DEFAULT_START_TEXT = "\n".join(
     [
         "Привет! Это ваш помощник по учебе в БГУИР.",
@@ -236,8 +237,19 @@ class TelegramBotClient:
         self._menu_button_payload = create_menu_button_payload(
             self.config
         )
+        self._default_request_timeout_s = self.config.polling_timeout_s + 5
+        self._control_request_timeout_s = min(
+            self._default_request_timeout_s,
+            CONTROL_REQUEST_TIMEOUT_S,
+        )
 
-    def _request(self, method: str, payload: dict[str, Any]) -> JsonValue:
+    def _request(
+        self,
+        method: str,
+        payload: dict[str, Any],
+        *,
+        timeout_s: int | None = None,
+    ) -> JsonValue:
         url = f"{self._api_base_url}/{method}"
         body = json.dumps(
             payload,
@@ -254,9 +266,14 @@ class TelegramBotClient:
                 "User-Agent": "front_tg_telegram_wrapper/1.0",
             },
         )
+        request_timeout_s = (
+            self._default_request_timeout_s
+            if timeout_s is None
+            else max(timeout_s, 1)
+        )
 
         try:
-            with urlopen(request, timeout=self.config.polling_timeout_s + 5) as response:
+            with urlopen(request, timeout=request_timeout_s) as response:
                 raw_body = response.read()
         except HTTPError as error:
             raise TelegramBotError(
@@ -294,7 +311,11 @@ class TelegramBotClient:
         if offset is not None:
             payload["offset"] = offset
 
-        response = self._request("getUpdates", payload)
+        response = self._request(
+            "getUpdates",
+            payload,
+            timeout_s=self._default_request_timeout_s,
+        )
         return response if isinstance(response, list) else []
 
     def send_start_message(self, chat_id: int) -> None:
@@ -304,16 +325,22 @@ class TelegramBotClient:
                 "chat_id": chat_id,
                 **self._start_message_base_payload,
             },
+            timeout_s=self._control_request_timeout_s,
         )
 
     def delete_webhook(self, drop_pending_updates: bool) -> None:
         self._request(
             "deleteWebhook",
             {"drop_pending_updates": drop_pending_updates},
+            timeout_s=self._control_request_timeout_s,
         )
 
     def set_chat_menu_button(self) -> None:
-        self._request("setChatMenuButton", self._menu_button_payload)
+        self._request(
+            "setChatMenuButton",
+            self._menu_button_payload,
+            timeout_s=self._control_request_timeout_s,
+        )
 
     def set_webhook(
         self,
@@ -331,7 +358,11 @@ class TelegramBotClient:
         if secret_token:
             payload["secret_token"] = secret_token
 
-        self._request("setWebhook", payload)
+        self._request(
+            "setWebhook",
+            payload,
+            timeout_s=self._control_request_timeout_s,
+        )
 
 
 def _read_telegram_error(raw_body: bytes) -> str:

@@ -3455,10 +3455,10 @@ body {
   border: 1px solid var(--app-card-border);
   background: linear-gradient(
     180deg,
-    rgba(17, 29, 43, 0.96),
-    rgba(22, 36, 52, 0.98)
+    rgba(20, 28, 42, 0.98),
+    rgba(13, 20, 31, 0.99)
   );
-  box-shadow: none;
+  box-shadow: 0 18px 36px rgba(8, 12, 18, 0.22);
 }
 
 .study-progress-table-scroll {
@@ -3468,14 +3468,14 @@ body {
 
 .study-progress-table {
   width: 100%;
-  min-width: 560px;
+  min-width: 760px;
   border-collapse: collapse;
   table-layout: fixed;
 }
 
 .study-progress-table th,
 .study-progress-table td {
-  border: 1px solid rgba(173, 190, 209, 0.14);
+  border: 1px solid rgba(173, 190, 209, 0.16);
 }
 
 .study-progress-table thead th {
@@ -3487,12 +3487,20 @@ body {
   text-align: center;
 }
 
+.study-progress-table tbody tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.study-progress-table tbody tr:hover {
+  background: rgba(114, 181, 255, 0.04);
+}
+
 .study-progress-index-head {
   width: 62px;
 }
 
 .study-progress-subject-head-cell {
-  width: 188px;
+  width: 220px;
 }
 
 .study-progress-total-head-inner {
@@ -3564,8 +3572,21 @@ body {
     color 0.15s ease;
 }
 
+.study-progress-cell-button:hover:not(.study-progress-cell-button--static) {
+  background: rgba(114, 181, 255, 0.08);
+}
+
+.study-progress-cell-button:focus-visible {
+  outline: 2px solid rgba(114, 181, 255, 0.42);
+  outline-offset: -2px;
+}
+
 .study-progress-cell-button--muted {
   color: var(--app-text-muted);
+}
+
+.study-progress-cell-button--static {
+  cursor: default;
 }
 
 .study-progress-cell-button--success:not(.study-progress-cell-button--active) {
@@ -3664,6 +3685,30 @@ body {
   margin: 0;
   font-size: 15px;
   line-height: 1.45;
+  color: #f5f9ff;
+}
+
+.study-progress-popover-list {
+  display: grid;
+  gap: 8px;
+}
+
+.study-progress-popover-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.study-progress-popover-item .study-mark-badge {
+  min-width: 32px;
+  height: 32px;
+  border-radius: 11px;
+  flex: 0 0 auto;
+}
+
+.study-progress-popover-item-text {
+  font-size: 13px;
+  line-height: 1.4;
   color: #f5f9ff;
 }
 .study-student-title,
