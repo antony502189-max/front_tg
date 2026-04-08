@@ -13,8 +13,9 @@ const TUNNEL_CONNECTION_ERROR_MESSAGE =
   'Соединение с мини-приложением временно прервалось. Попробуйте ещё раз через несколько секунд.'
 const TRANSIENT_API_ERROR_MESSAGE =
   'Сервис временно недоступен. Попробуйте ещё раз через несколько секунд.'
+const SERVER_STARTING_ERROR_MESSAGE =
+  'Сервер запускается после периода неактивности. Подождите 30 секунд и повторите запрос.'
 const TRANSIENT_API_STATUS_CODES = new Set([
-  502,
   503,
   504,
   520,
@@ -185,6 +186,11 @@ const shouldRetryApiError = (error: unknown) => {
 
   const statusCode = error.response?.status
 
+  // Retry 502 (server starting) and other transient errors
+  if (statusCode === 502) {
+    return true
+  }
+
   if (
     typeof statusCode === 'number' &&
     TRANSIENT_API_STATUS_CODES.has(statusCode)
@@ -332,6 +338,11 @@ export const getApiErrorMessage = (
     }
 
     const statusCode = error.response?.status
+
+    // 502 Bad Gateway - server is starting up (common on Render.com)
+    if (statusCode === 502) {
+      return SERVER_STARTING_ERROR_MESSAGE
+    }
 
     if (
       statusCode === 530 ||
