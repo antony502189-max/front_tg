@@ -123,11 +123,26 @@ const resolveSubjectOmissionCount = (
   return abbreviationValue === null ? undefined : abbreviationValue
 }
 
-const isIisAuthorizationError = (message: string | null) =>
-  typeof message === 'string' &&
-  message
-    .toLocaleLowerCase('ru-RU')
-    .includes(IIS_AUTH_ERROR_MARKER)
+const isIisAuthorizationError = (message: string | null) => {
+  if (typeof message !== 'string') {
+    return false
+  }
+
+  const normalized = message.toLocaleLowerCase('ru-RU')
+  const result = normalized.includes(IIS_AUTH_ERROR_MARKER)
+
+  // Debug logging
+  if (import.meta.env.DEV) {
+    console.log('[isIisAuthorizationError]', {
+      original: message,
+      normalized,
+      marker: IIS_AUTH_ERROR_MARKER,
+      result,
+    })
+  }
+
+  return result
+}
 
 const StudyMetricValue = ({
   isLoading,

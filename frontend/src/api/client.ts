@@ -350,6 +350,14 @@ export const getApiErrorMessage = (
 
     const payloadMessage = extractPayloadMessage(error.response?.data)
     if (payloadMessage) {
+      // Debug logging
+      if (import.meta.env.DEV) {
+        console.log('[getApiErrorMessage] Extracted from payload:', {
+          statusCode,
+          data: error.response?.data,
+          payloadMessage,
+        })
+      }
       return payloadMessage
     }
 
