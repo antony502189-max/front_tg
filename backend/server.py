@@ -3172,10 +3172,14 @@ class BackendApp:
                 {"error": 'Query param "studentCardNumber" is required'},
             )
 
+        telegram_user_id = first_query_value(parsed_url, "telegramUserId")
+        profile = self.profile_store.get(telegram_user_id) if telegram_user_id else None
         student_group = first_query_value(parsed_url, "studentGroup")
         params = {"studentCardNumber": student_card_number}
         if student_group is not None:
             params["studentGroup"] = student_group
+        if profile is not None and profile.updated_at:
+            params["profileUpdatedAt"] = profile.updated_at
 
         key = cache_key("/grades", params)
         force_refresh = should_force_refresh(parsed_url)
@@ -3245,10 +3249,14 @@ class BackendApp:
                 {"error": 'Query param "studentCardNumber" is required'},
             )
 
+        telegram_user_id = first_query_value(parsed_url, "telegramUserId")
+        profile = self.profile_store.get(telegram_user_id) if telegram_user_id else None
         student_group = first_query_value(parsed_url, "studentGroup")
         params = {"studentCardNumber": student_card_number}
         if student_group is not None:
             params["studentGroup"] = student_group
+        if profile is not None and profile.updated_at:
+            params["profileUpdatedAt"] = profile.updated_at
 
         key = cache_key("/rating-summary", params)
         force_refresh = should_force_refresh(parsed_url)

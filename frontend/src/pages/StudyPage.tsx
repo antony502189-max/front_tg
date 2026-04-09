@@ -221,10 +221,10 @@ export const StudyPage = () => {
     normalizedSessionUserId.length > 0 &&
     hasIisCredentials
   const gradesPersistentCacheKey = canLoadGrades
-    ? `grades:${normalizedStudentCardNumber}`
+    ? `grades:${normalizedStudentCardNumber}:${normalizedProfileUpdatedAt || 'v0'}`
     : null
   const gradesSummaryPersistentCacheKey = canLoadGrades
-    ? `grades-summary:${normalizedStudentCardNumber}:${normalizedGroupNumber || 'nogroup'}`
+    ? `grades-summary:${normalizedStudentCardNumber}:${normalizedGroupNumber || 'nogroup'}:${normalizedProfileUpdatedAt || 'v0'}`
     : null
   const omissionsPersistentCacheKey = canLoadOmissions
     ? `omissions:${normalizedSessionUserId}:${normalizedIisLogin}:${normalizedProfileUpdatedAt || 'v0'}`
@@ -239,8 +239,9 @@ export const StudyPage = () => {
         signal,
         forceRefresh: context.reloadToken > 0,
         refreshToken: String(context.reloadToken),
+        telegramUserId: normalizedSessionUserId,
       }),
-    [normalizedStudentCardNumber],
+    [normalizedStudentCardNumber, normalizedSessionUserId],
   )
   const loadGradesSummary = useCallback(
     (
@@ -252,8 +253,9 @@ export const StudyPage = () => {
         forceRefresh: context.reloadToken > 0,
         refreshToken: String(context.reloadToken),
         signal,
+        telegramUserId: normalizedSessionUserId,
       }),
-    [normalizedGroupNumber, normalizedStudentCardNumber],
+    [normalizedGroupNumber, normalizedStudentCardNumber, normalizedSessionUserId],
   )
   const loadOmissions = useCallback(
     (

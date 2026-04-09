@@ -116,12 +116,17 @@ export async function fetchGrades(
     signal?: AbortSignal
     forceRefresh?: boolean
     refreshToken?: string
+    telegramUserId?: string
   } = {},
 ): Promise<GradesResponse> {
-  const { forceRefresh = false, refreshToken, signal } = options
+  const { forceRefresh = false, refreshToken, signal, telegramUserId } = options
   const normalizedStudentCardNumber = studentCardNumber.trim()
   const params: Record<string, string> = {
     studentCardNumber: normalizedStudentCardNumber,
+  }
+
+  if (telegramUserId) {
+    params.telegramUserId = telegramUserId.trim()
   }
 
   if (forceRefresh) {
@@ -156,6 +161,7 @@ export async function fetchGradesSummary(
     signal?: AbortSignal
     forceRefresh?: boolean
     refreshToken?: string
+    telegramUserId?: string
   } = {},
 ): Promise<GradesSummaryResponse> {
   const {
@@ -163,6 +169,7 @@ export async function fetchGradesSummary(
     groupNumber,
     refreshToken,
     signal,
+    telegramUserId,
   } = options
   const normalizedStudentCardNumber = studentCardNumber.trim()
   const normalizedGroupNumber = groupNumber?.trim()
@@ -172,6 +179,10 @@ export async function fetchGradesSummary(
 
   if (normalizedGroupNumber) {
     params.studentGroup = normalizedGroupNumber
+  }
+
+  if (telegramUserId) {
+    params.telegramUserId = telegramUserId.trim()
   }
 
   if (forceRefresh) {
