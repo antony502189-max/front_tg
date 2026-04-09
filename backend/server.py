@@ -4,6 +4,7 @@ import json
 import logging
 import math
 import re
+import ssl
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, replace
@@ -371,7 +372,12 @@ def create_fetcher(config: AppConfig) -> Fetcher:
         )
 
         try:
-            with urlopen(request, timeout=timeout_seconds) as response:
+            # Create SSL context that doesn't verify certificates for iis.bsuir.by
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+
+            with urlopen(request, timeout=timeout_seconds, context=ssl_context) as response:
                 charset = response.headers.get_content_charset() or "utf-8"
                 raw_body = response.read()
                 payload = raw_body.decode(charset)

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import logging
+import ssl
 import time
 from http.cookiejar import CookieJar
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import (
     HTTPCookieProcessor,
+    HTTPSHandler,
     Request,
     build_opener,
 )
@@ -118,8 +120,16 @@ class OmissionsService:
         username: str,
         password: str,
     ) -> Any:
+        # Create SSL context that doesn't verify certificates for iis.bsuir.by
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+
         cookie_jar = CookieJar()
-        opener = build_opener(HTTPCookieProcessor(cookie_jar))
+        opener = build_opener(
+            HTTPSHandler(context=ssl_context),
+            HTTPCookieProcessor(cookie_jar)
+        )
 
         self._request_json(
             opener,
