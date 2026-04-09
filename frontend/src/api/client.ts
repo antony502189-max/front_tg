@@ -40,6 +40,11 @@ const responseCache = new Map<
   }
 >()
 const inflightRequests = new Map<string, Promise<unknown>>()
+const API_ERROR_LOG_PATHS = new Set([
+  '/grades',
+  '/rating-summary',
+  '/omissions',
+])
 
 const getApiBaseUrl = () => {
   const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim()
@@ -216,6 +221,99 @@ const canRetryRequest = (
   return !!config && (!method || method === 'get')
 }
 
+const maskLogValue = (value: unknown) => {
+  if (typeof value !== 'string') {
+    return value
+  }
+
+  const normalized = value.trim()
+  if (normalized.length <= 4) {
+    return '*'.repeat(normalized.length)
+  }
+
+  return `${'*'.repeat(normalized.length - 4)}${normalized.slice(-4)}`
+}
+
+const sanitizeLogParams = (params: unknown) => {
+  if (!params || typeof params !== 'object' || Array.isArray(params)) {
+    return null
+  }
+
+  const record = params as Record<string, unknown>
+  const sanitized: Record<string, unknown> = {}
+
+  for (const [key, value] of Object.entries(record)) {
+    if (value == null) {
+      continue
+    }
+
+    sanitized[key] =
+      key === 'studentCardNumber' || key === 'telegramUserId'
+        ? maskLogValue(String(value))
+        : value
+  }
+
+  return sanitized
+}
+
+const getLoggableApiPath = (
+  config: RetriableRequestConfig | undefined,
+) => {
+  const rawUrl = config?.url
+  if (typeof rawUrl !== 'string' || !rawUrl.trim()) {
+    return null
+  }
+
+  try {
+    const resolvedUrl = rawUrl.startsWith('http')
+      ? new URL(rawUrl)
+      : new URL(rawUrl, apiBaseUrl.startsWith('http') ? apiBaseUrl : 'https://local.api')
+    const pathname = resolvedUrl.pathname
+    const normalizedPath = pathname.startsWith('/api/')
+      ? pathname.slice(4)
+      : pathname
+
+    return API_ERROR_LOG_PATHS.has(normalizedPath)
+      ? normalizedPath
+      : null
+  } catch {
+    return null
+  }
+}
+
+const logApiRequestError = (error: unknown) => {
+  if (!axios.isAxiosError(error) || error.code === 'ERR_CANCELED') {
+    return
+  }
+
+  const config = error.config as RetriableRequestConfig | undefined
+  const path = getLoggableApiPath(config)
+  if (!path) {
+    return
+  }
+
+  const params = sanitizeLogParams(config?.params)
+  const payloadMessage = extractPayloadMessage(error.response?.data)
+  const normalizedMessage = payloadMessage ??
+    normalizeApiMessage(error.message ?? null) ??
+    'API request failed'
+
+  console.error('[api:error]', {
+    code: error.code ?? null,
+    message: normalizedMessage,
+    params,
+    path,
+    refresh:
+      typeof config?.params === 'object' &&
+      config?.params !== null &&
+      !Array.isArray(config.params) &&
+      'refresh' in (config.params as Record<string, unknown>)
+        ? (config.params as Record<string, unknown>).refresh
+        : null,
+    status: error.response?.status ?? null,
+  })
+}
+
 apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -239,9 +337,7 @@ apiClient.interceptors.response.use(
       }
     }
 
-    if (import.meta.env.DEV) {
-      console.error('[API error]', error)
-    }
+    logApiRequestError(error)
 
     return Promise.reject(error)
   },

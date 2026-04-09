@@ -114,18 +114,27 @@ export async function fetchGrades(
   studentCardNumber: string,
   options: {
     signal?: AbortSignal
+    forceRefresh?: boolean
+    refreshToken?: string
   } = {},
 ): Promise<GradesResponse> {
-  const { signal } = options
+  const { forceRefresh = false, refreshToken, signal } = options
   const normalizedStudentCardNumber = studentCardNumber.trim()
+  const params: Record<string, string> = {
+    studentCardNumber: normalizedStudentCardNumber,
+  }
+
+  if (forceRefresh) {
+    params.refresh = refreshToken?.trim() || '1'
+  }
 
   const payload = await apiGet<GradesResponse & Record<string, unknown>>(
     '/grades',
     {
-      params: { studentCardNumber: normalizedStudentCardNumber },
+      params,
       timeout: GRADES_API_TIMEOUT_MS,
       signal,
-      cacheTtlMs: 60_000,
+      cacheTtlMs: forceRefresh ? 0 : 60_000,
     },
   )
 
@@ -145,9 +154,16 @@ export async function fetchGradesSummary(
   options: {
     groupNumber?: string
     signal?: AbortSignal
+    forceRefresh?: boolean
+    refreshToken?: string
   } = {},
 ): Promise<GradesSummaryResponse> {
-  const { groupNumber, signal } = options
+  const {
+    forceRefresh = false,
+    groupNumber,
+    refreshToken,
+    signal,
+  } = options
   const normalizedStudentCardNumber = studentCardNumber.trim()
   const normalizedGroupNumber = groupNumber?.trim()
   const params: Record<string, string> = {
@@ -158,13 +174,17 @@ export async function fetchGradesSummary(
     params.studentGroup = normalizedGroupNumber
   }
 
+  if (forceRefresh) {
+    params.refresh = refreshToken?.trim() || '1'
+  }
+
   const payload = await apiGet<
     GradesSummaryResponse & Record<string, unknown>
   >('/rating-summary', {
     params,
     timeout: GRADES_SUMMARY_API_TIMEOUT_MS,
     signal,
-    cacheTtlMs: 60_000,
+    cacheTtlMs: forceRefresh ? 0 : 60_000,
   })
 
   return {

@@ -25,7 +25,12 @@ type UseAsyncResourceOptions<T> = {
   enabled: boolean
   requestKey: string | null
   initialData: T
-  load: (signal: AbortSignal) => Promise<T>
+  load: (
+    signal: AbortSignal,
+    context: {
+      reloadToken: number
+    },
+  ) => Promise<T>
   getErrorMessage: (error: unknown) => string
   keepPreviousData?: boolean
   persistentCache?: {
@@ -185,7 +190,9 @@ export const useAsyncResource = <T,>({
 
     const controller = new AbortController()
 
-    void load(controller.signal)
+    void load(controller.signal, {
+      reloadToken,
+    })
       .then((data) => {
         if (!controller.signal.aborted) {
           commitSuccess(
@@ -211,7 +218,7 @@ export const useAsyncResource = <T,>({
     return () => {
       controller.abort()
     }
-  }, [activeRequestKey, load, logicalRequestKey])
+  }, [activeRequestKey, load, logicalRequestKey, reloadToken])
 
   const hasResolvedCurrentRequest =
     !!activeRequestKey && state.requestKey === activeRequestKey

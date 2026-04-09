@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from http.cookiejar import CookieJar
 from typing import Any, Callable
@@ -15,6 +16,7 @@ from urllib.request import (
 JsonValue = Any
 UpstreamErrorFactory = Callable[..., Exception]
 LOGIN_ERROR_MESSAGE = "Не удалось авторизоваться в IIS. Проверьте логин и пароль."
+LOGGER = logging.getLogger(__name__)
 
 
 def _extract_error_message(raw_body: bytes) -> str:
@@ -191,6 +193,7 @@ class OmissionsService:
             headers=headers,
             method=method,
         )
+        started_at = time.perf_counter()
 
         try:
             with opener.open(request, timeout=self.timeout_seconds) as response:
@@ -200,25 +203,68 @@ class OmissionsService:
                 try:
                     return json.loads(decoded) if decoded else None
                 except json.JSONDecodeError as error:
+                    LOGGER.warning(
+                        "IIS omissions request failed: path=%s method=%s status=%s durationMs=%s message=%s",
+                        path,
+                        method,
+                        None,
+                        int((time.perf_counter() - started_at) * 1000),
+                        "Upstream API returned invalid JSON",
+                    )
                     raise self.upstream_error_cls(
                         "Upstream API returned invalid JSON"
                     ) from error
         except HTTPError as error:
             if path == "/auth/login" and error.code in {401, 403}:
+                LOGGER.warning(
+                    "IIS omissions request failed: path=%s method=%s status=%s durationMs=%s message=%s",
+                    path,
+                    method,
+                    error.code,
+                    int((time.perf_counter() - started_at) * 1000),
+                    LOGIN_ERROR_MESSAGE,
+                )
                 raise self.upstream_error_cls(
                     LOGIN_ERROR_MESSAGE,
                     error.code,
                 ) from error
 
+            error_message = _extract_error_message(error.read())
+            LOGGER.warning(
+                "IIS omissions request failed: path=%s method=%s status=%s durationMs=%s message=%s",
+                path,
+                method,
+                error.code,
+                int((time.perf_counter() - started_at) * 1000),
+                error_message,
+            )
             raise self.upstream_error_cls(
-                _extract_error_message(error.read()),
+                error_message,
                 error.code,
             ) from error
         except TimeoutError as error:
+            message = str(error) or "Upstream API request timed out"
+            LOGGER.warning(
+                "IIS omissions request failed: path=%s method=%s status=%s durationMs=%s message=%s",
+                path,
+                method,
+                None,
+                int((time.perf_counter() - started_at) * 1000),
+                message,
+            )
             raise self.upstream_error_cls(
-                str(error) or "Upstream API request timed out"
+                message
             ) from error
         except URLError as error:
+            message = str(error.reason or "Upstream API request failed")
+            LOGGER.warning(
+                "IIS omissions request failed: path=%s method=%s status=%s durationMs=%s message=%s",
+                path,
+                method,
+                None,
+                int((time.perf_counter() - started_at) * 1000),
+                message,
+            )
             raise self.upstream_error_cls(
-                str(error.reason or "Upstream API request failed")
+                message
             ) from error

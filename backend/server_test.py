@@ -331,10 +331,65 @@ class BackendServerTests(unittest.TestCase):
             now_ms=lambda: now_value,
         )
 
-        response = app.handle_request("GET", "/api/grades?studentCardNumber=123")
+        with self.assertLogs("backend.server", level="WARNING") as captured:
+            response = app.handle_request("GET", "/api/grades?studentCardNumber=123")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.payload, {"subjects": [{"id": "1"}]})
+        self.assertTrue(
+            any(
+                "Serving stale cache after upstream error" in message
+                for message in captured.output
+            )
+        )
+
+    def test_grades_route_force_refresh_bypasses_fresh_cache(self) -> None:
+        now_value = 10_000
+        key = cache_key("/grades", {"studentCardNumber": "123"})
+        store = {
+            key: CacheEntry(
+                payload={"subjects": [{"id": "cached"}]},
+                fresh_until=now_value + 60_000,
+                stale_until=now_value + 120_000,
+            )
+        }
+        app = BackendApp(
+            config=TEST_CONFIG,
+            store=store,
+            fetcher=lambda *_: {},
+            now_ms=lambda: now_value,
+        )
+        app._build_grades_payload = lambda *_args, **_kwargs: {  # type: ignore[method-assign]
+            "subjects": [{"id": "fresh"}]
+        }
+
+        response = app.handle_request(
+            "GET",
+            "/api/grades?studentCardNumber=123&refresh=1",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.payload, {"subjects": [{"id": "fresh"}]})
+        self.assertEqual(store[key].payload, {"subjects": [{"id": "fresh"}]})
+
+    def test_grades_upstream_error_is_logged(self) -> None:
+        def failing_fetcher(path: str, _params: dict[str, str]):
+            if path.startswith("/rating/"):
+                raise UpstreamRequestError("boom", status=503)
+            raise AssertionError(f"Unexpected path: {path}")
+
+        app = BackendApp(
+            config=TEST_CONFIG,
+            fetcher=failing_fetcher,
+        )
+
+        with self.assertLogs("backend.server", level="WARNING") as captured:
+            response = app.handle_request("GET", "/api/grades?studentCardNumber=123")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertTrue(
+            any("Upstream request failed" in message for message in captured.output)
+        )
 
     def test_concurrent_identical_requests_share_inflight_result(self) -> None:
         release = Event()
@@ -2719,6 +2774,80 @@ class BackendServerTests(unittest.TestCase):
                 ],
             )
             self.assertEqual(service.calls, [("56841017", "secret")])
+        finally:
+            store_path.unlink(missing_ok=True)
+
+    def test_omissions_route_cache_key_tracks_profile_updated_at(self) -> None:
+        store_path = Path("backend") / "_profile_store_omissions_cache_key_test.json"
+        store_path.unlink(missing_ok=True)
+
+        class FakeOmissionsService:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def fetch_month_student_omission_counts(
+                self,
+                _username: str,
+                _password: str,
+            ):
+                self.calls += 1
+                return [
+                    {"month": "Февраль", "omissionCount": self.calls},
+                ]
+
+        try:
+            service = FakeOmissionsService()
+            app = BackendApp(
+                config=TEST_CONFIG,
+                fetcher=lambda *_: {},
+                profile_store=UserProfileStore(store_path),
+                omissions_service=service,
+            )
+            base_payload = {
+                "telegramUserId": "tg:94",
+                "role": "student",
+                "groupNumber": "568403",
+                "studentCardNumber": "56841017",
+                "iisLogin": "56841017",
+                "iisPassword": "secret",
+            }
+            app.handle_request(
+                "PUT",
+                "/api/profile",
+                body=json.dumps(
+                    {
+                        **base_payload,
+                        "updatedAt": "2026-03-01T00:00:00+00:00",
+                    }
+                ).encode("utf-8"),
+            )
+
+            initial_response = app.handle_request(
+                "GET",
+                "/api/omissions?telegramUserId=tg:94",
+            )
+
+            app.handle_request(
+                "PUT",
+                "/api/profile",
+                body=json.dumps(
+                    {
+                        **base_payload,
+                        "updatedAt": "2026-03-02T00:00:00+00:00",
+                    }
+                ).encode("utf-8"),
+            )
+
+            updated_response = app.handle_request(
+                "GET",
+                "/api/omissions?telegramUserId=tg:94",
+            )
+
+            self.assertEqual(initial_response.status_code, 200)
+            self.assertEqual(initial_response.payload["totalHours"], 1)
+            self.assertEqual(updated_response.status_code, 200)
+            self.assertEqual(updated_response.payload["totalHours"], 2)
+            self.assertEqual(service.calls, 2)
         finally:
             store_path.unlink(missing_ok=True)
 

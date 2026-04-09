@@ -231,21 +231,38 @@ export const StudyPage = () => {
     : null
 
   const loadGrades = useCallback(
-    (signal: AbortSignal) =>
-      fetchGrades(normalizedStudentCardNumber, { signal }),
+    (
+      signal: AbortSignal,
+      context: { reloadToken: number },
+    ) =>
+      fetchGrades(normalizedStudentCardNumber, {
+        signal,
+        forceRefresh: context.reloadToken > 0,
+        refreshToken: String(context.reloadToken),
+      }),
     [normalizedStudentCardNumber],
   )
   const loadGradesSummary = useCallback(
-    (signal: AbortSignal) =>
+    (
+      signal: AbortSignal,
+      context: { reloadToken: number },
+    ) =>
       fetchGradesSummary(normalizedStudentCardNumber, {
         groupNumber: normalizedGroupNumber,
+        forceRefresh: context.reloadToken > 0,
+        refreshToken: String(context.reloadToken),
         signal,
       }),
     [normalizedGroupNumber, normalizedStudentCardNumber],
   )
   const loadOmissions = useCallback(
-    (signal: AbortSignal) =>
+    (
+      signal: AbortSignal,
+      context: { reloadToken: number },
+    ) =>
       fetchOmissions(normalizedSessionUserId, {
+        forceRefresh: context.reloadToken > 0,
+        refreshToken: String(context.reloadToken),
         signal,
       }),
     [normalizedSessionUserId],

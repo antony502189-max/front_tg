@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from urllib.error import URLError
 
 from backend.services.omissions import LOGIN_ERROR_MESSAGE, OmissionsService
 
@@ -41,6 +42,11 @@ class _FakeOpener:
         return _FakeResponse(self.body)
 
 
+class _FailingOpener:
+    def open(self, _request, timeout: float):  # noqa: ANN001
+        raise URLError("boom")
+
+
 class OmissionsServiceTests(unittest.TestCase):
     def create_service(self) -> OmissionsService:
         return OmissionsService(
@@ -54,12 +60,28 @@ class OmissionsServiceTests(unittest.TestCase):
     def test_request_json_wraps_invalid_json_as_upstream_error(self) -> None:
         service = self.create_service()
 
-        with self.assertRaises(DummyUpstreamError) as error_context:
-            service._request_json(_FakeOpener(b"{not-json}"), "/grade-book")
+        with self.assertLogs("backend.services.omissions", level="WARNING") as captured:
+            with self.assertRaises(DummyUpstreamError) as error_context:
+                service._request_json(_FakeOpener(b"{not-json}"), "/grade-book")
 
         self.assertEqual(
             error_context.exception.message,
             "Upstream API returned invalid JSON",
+        )
+        self.assertTrue(
+            any("IIS omissions request failed" in message for message in captured.output)
+        )
+
+    def test_request_json_logs_transport_errors(self) -> None:
+        service = self.create_service()
+
+        with self.assertLogs("backend.services.omissions", level="WARNING") as captured:
+            with self.assertRaises(DummyUpstreamError) as error_context:
+                service._request_json(_FailingOpener(), "/grade-book")
+
+        self.assertIn("boom", error_context.exception.message)
+        self.assertTrue(
+            any("IIS omissions request failed" in message for message in captured.output)
         )
 
     def test_run_with_retries_does_not_retry_non_upstream_errors(self) -> None:

@@ -35,17 +35,25 @@ export async function fetchOmissions(
   telegramUserId: string,
   options: {
     signal?: AbortSignal
+    forceRefresh?: boolean
+    refreshToken?: string
   } = {},
 ): Promise<OmissionsResponse> {
+  const params: Record<string, string> = {
+    telegramUserId: telegramUserId.trim(),
+  }
+
+  if (options.forceRefresh) {
+    params.refresh = options.refreshToken?.trim() || '1'
+  }
+
   const payload = await apiGet<
     OmissionsResponse & Record<string, unknown>
   >('/omissions', {
-    params: {
-      telegramUserId: telegramUserId.trim(),
-    },
+    params,
     timeout: OMISSIONS_API_TIMEOUT_MS,
     signal: options.signal,
-    cacheTtlMs: 60_000,
+    cacheTtlMs: options.forceRefresh ? 0 : 60_000,
   })
 
   const months = Array.isArray(payload.months)

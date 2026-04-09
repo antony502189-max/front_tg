@@ -2324,6 +2324,36 @@ def first_query_value(parsed_url: Any, *names: str) -> str | None:
     return None
 
 
+def should_force_refresh(parsed_url: Any) -> bool:
+    return first_query_value(parsed_url, "refresh", "forceRefresh") is not None
+
+
+def _mask_log_value(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+
+    normalized = value.strip()
+    if len(normalized) <= 4:
+        return "*" * len(normalized)
+
+    return f"{'*' * (len(normalized) - 4)}{normalized[-4:]}"
+
+
+def sanitize_log_params(params: Mapping[str, Any]) -> dict[str, Any]:
+    sanitized: dict[str, Any] = {}
+    for key, value in params.items():
+        if value is None:
+            continue
+
+        sanitized[key] = (
+            _mask_log_value(value)
+            if key in {"studentCardNumber", "telegramUserId"}
+            else value
+        )
+
+    return sanitized
+
+
 class BackendApp:
     def __init__(
         self,
@@ -2448,14 +2478,56 @@ class BackendApp:
             with self.lock:
                 self._telegram_webhook_setup_started = False
 
-    def request_upstream(self, path: str, params: dict[str, str]) -> JsonValue:
-        return fetch_with_retry(
-            self.fetcher,
-            path,
-            params,
-            self.config.max_retries,
-            self.config.retry_delay_ms,
+    @staticmethod
+    def _should_log_upstream_error(path: str) -> bool:
+        return path.startswith("/rating/")
+
+    @staticmethod
+    def _should_log_stale_cache(cache_key_value: str) -> bool:
+        return cache_key_value.startswith(
+            ("/grades?", "/rating?", "/rating-summary?", "/omissions?")
         )
+
+    def _log_upstream_error(
+        self,
+        *,
+        path: str,
+        params: Mapping[str, Any],
+        error: UpstreamRequestError,
+        duration_ms: int,
+        timeout_ms: int | None = None,
+    ) -> None:
+        if not self._should_log_upstream_error(path):
+            return
+
+        LOGGER.warning(
+            "Upstream request failed: path=%s params=%s status=%s durationMs=%s timeoutMs=%s message=%s",
+            path,
+            sanitize_log_params(params),
+            error.status,
+            duration_ms,
+            timeout_ms,
+            error.message,
+        )
+
+    def request_upstream(self, path: str, params: dict[str, str]) -> JsonValue:
+        started_at = time.perf_counter()
+        try:
+            return fetch_with_retry(
+                self.fetcher,
+                path,
+                params,
+                self.config.max_retries,
+                self.config.retry_delay_ms,
+            )
+        except UpstreamRequestError as error:
+            self._log_upstream_error(
+                path=path,
+                params=params,
+                error=error,
+                duration_ms=int((time.perf_counter() - started_at) * 1000),
+            )
+            raise
 
     def _timeout_fetcher(self, timeout_ms: int) -> Fetcher:
         if not self.uses_default_fetcher:
@@ -2484,13 +2556,24 @@ class BackendApp:
         timeout_ms: int,
         max_retries: int,
     ) -> JsonValue:
-        return fetch_with_retry(
-            self._timeout_fetcher(timeout_ms),
-            path,
-            params,
-            max_retries,
-            self.config.retry_delay_ms,
-        )
+        started_at = time.perf_counter()
+        try:
+            return fetch_with_retry(
+                self._timeout_fetcher(timeout_ms),
+                path,
+                params,
+                max_retries,
+                self.config.retry_delay_ms,
+            )
+        except UpstreamRequestError as error:
+            self._log_upstream_error(
+                path=path,
+                params=params,
+                error=error,
+                duration_ms=int((time.perf_counter() - started_at) * 1000),
+                timeout_ms=timeout_ms,
+            )
+            raise
 
     def _request_grades_search(self, student_card_number: str) -> JsonValue:
         return self.rating_service.request_grades_search(student_card_number)
@@ -2927,9 +3010,13 @@ class BackendApp:
         self,
         cache_key_value: str,
         builder: Callable[[], JsonValue],
+        *,
+        force_refresh: bool = False,
     ) -> Response:
         now_value = self.now_ms()
-        cached = self._read_fresh_cache(cache_key_value, now_value)
+        cached = None
+        if not force_refresh:
+            cached = self._read_fresh_cache(cache_key_value, now_value)
 
         if cached is not None:
             return Response(200, cached)
@@ -2956,6 +3043,14 @@ class BackendApp:
             )
 
             if stale_payload is not None:
+                if self._should_log_stale_cache(cache_key_value):
+                    LOGGER.warning(
+                        "Serving stale cache after upstream error: cacheKey=%s forceRefresh=%s status=%s message=%s",
+                        cache_key_value,
+                        force_refresh,
+                        error.status,
+                        error.message,
+                    )
                 inflight_request.set_result(stale_payload)
                 return Response(200, stale_payload)
 
@@ -3083,12 +3178,35 @@ class BackendApp:
             params["studentGroup"] = student_group
 
         key = cache_key("/grades", params)
+        force_refresh = should_force_refresh(parsed_url)
         return self._serve_cached_payload(
             key,
             lambda: self._build_grades_payload(
                 student_card_number,
                 student_group=student_group,
             ),
+            force_refresh=force_refresh,
+        )
+
+    def _handle_omissions_request(self, parsed_url: Any) -> Response:
+        telegram_user_id = first_query_value(parsed_url, "telegramUserId")
+        if telegram_user_id is None:
+            return Response(
+                400,
+                {"error": 'Query param "telegramUserId" is required'},
+            )
+
+        profile = self.profile_store.get(telegram_user_id)
+        params = {"telegramUserId": telegram_user_id}
+        if profile is not None and profile.updated_at:
+            params["profileUpdatedAt"] = profile.updated_at
+
+        force_refresh = should_force_refresh(parsed_url)
+        key = cache_key("/omissions", params)
+        return self._serve_cached_payload(
+            key,
+            lambda: self._build_omissions_payload(telegram_user_id),
+            force_refresh=force_refresh,
         )
 
     def _handle_rating_request(self, parsed_url: Any) -> Response:
@@ -3108,6 +3226,7 @@ class BackendApp:
             params["studentGroup"] = student_group
 
         key = cache_key("/rating", params)
+        force_refresh = should_force_refresh(parsed_url)
         return self._serve_cached_payload(
             key,
             lambda: self._build_grades_payload(
@@ -3115,6 +3234,7 @@ class BackendApp:
                 student_group=student_group,
                 resolve_student_card_summary=True,
             ),
+            force_refresh=force_refresh,
         )
 
     def _handle_rating_summary_request(self, parsed_url: Any) -> Response:
@@ -3131,12 +3251,14 @@ class BackendApp:
             params["studentGroup"] = student_group
 
         key = cache_key("/rating-summary", params)
+        force_refresh = should_force_refresh(parsed_url)
         return self._serve_cached_payload(
             key,
             lambda: self._build_rating_summary_payload(
                 student_card_number,
                 student_group=student_group,
             ),
+            force_refresh=force_refresh,
         )
 
     def _handle_employee_search_request(self, parsed_url: Any) -> Response:
@@ -3345,6 +3467,9 @@ class BackendApp:
 
         if parsed_url.path == "/api/grades":
             return self._handle_grades_request(parsed_url)
+
+        if parsed_url.path == "/api/omissions":
+            return self._handle_omissions_request(parsed_url)
 
         if parsed_url.path == "/api/rating-summary":
             return self._handle_rating_summary_request(parsed_url)
