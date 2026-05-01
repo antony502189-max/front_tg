@@ -2,94 +2,88 @@
 
 Telegram Mini App для БГУИР с frontend на React + Vite и backend на Python.
 
-Проект решает одну задачу: дать студенту или преподавателю единый интерфейс для расписания, учебных данных, поиска по университету и личного профиля. Frontend не ходит в IIS БГУИР напрямую. Все запросы идут через свой backend, который кэширует ответы, повторяет временно неудачные запросы и приводит внешние данные к стабильному формату.
+Приложение даёт студенту или преподавателю единый интерфейс для расписания, учебных данных, поиска по университету, планера задач и профиля. Frontend не обращается к IIS БГУИР напрямую: все запросы идут через backend, который кэширует ответы, повторяет временно неудачные запросы и приводит внешние данные к стабильному формату.
 
-## Что умеет приложение
+## Возможности
 
-### Для студента
+### Студент
 
-- планер задач с привязкой к сегодняшним занятиям;
-- расписание по группе с режимами `day`, `week`, `month`, `semester`;
+- расписание группы в режимах `day`, `week`, `month`, `semester`;
 - фильтрация расписания по подгруппе;
-- раздел `Учёба`: средний балл, место в рейтинге, оценки по предметам, пропуски по неуважительной причине;
+- раздел `Учёба`: оценки, средний балл, позиция в рейтинге и пропуски;
 - поиск преподавателей;
-- поиск свободных аудиторий с учётом текущего расписания группы;
-- редактирование и сброс профиля.
-
-### Для преподавателя
-
+- поиск аудиторий и свободных аудиторий с учётом текущего расписания группы;
 - планер задач;
+- сохранение профиля, номера группы, подгруппы, номера зачётки и IIS-данных.
+
+### Преподаватель
+
 - расписание по профилю преподавателя;
 - поиск преподавателей;
-- поиск свободных аудиторий с учётом расписания преподавателя;
-- редактирование и сброс профиля.
+- поиск аудиторий и свободных аудиторий с учётом расписания преподавателя;
+- планер задач;
+- сохранение профиля преподавателя.
 
-Важно: раздел `Учёба` сейчас ориентирован только на студента. Для преподавателя он показывает заглушку, потому что backend пока не получает для этой роли нужные учебные данные.
+Раздел `Учёба` ориентирован на студента. Для преподавателя в интерфейсе нет полноценного учебного отчёта, потому что backend не получает для этой роли оценки, рейтинг и пропуски.
 
-## Как устроен проект
+## Архитектура
 
-Схема работы:
+```text
+Telegram Bot -> Mini App frontend -> Python backend -> IIS BSUIR API
+```
 
-`Telegram Bot -> Mini App frontend -> Python backend -> IIS BSUIR API`
-
-Что делает backend:
+Backend делает следующее:
 
 - проксирует запросы к `https://iis.bsuir.by/api/v1`;
-- нормализует ответы под нужды интерфейса;
-- кэширует данные в памяти;
-- делает retry на временных ошибках;
-- может отдавать устаревший кэш, если upstream временно недоступен;
-- хранит пользовательские профили для Mini App и Telegram-бота.
+- нормализует расписание, оценки, рейтинг, пропуски, преподавателей и аудитории;
+- хранит in-memory cache и умеет отдавать stale cache при временных ошибках upstream API;
+- повторяет временно неудачные upstream-запросы;
+- дедуплицирует одинаковые параллельные backend-запросы;
+- хранит пользовательские профили в файловом JSON-хранилище;
+- обслуживает Telegram webhook для Mini App-бота.
 
 ## Стек
 
-- frontend: `Rios`, `Tailwind CSS`, `Lucide React`, `@twa-dev/sdk`;eact 19`, `TypeScript`, `Vite`, `React Router`, `Zustand`, `Ax
+- frontend: `React 19`, `TypeScript`, `Vite`, `React Router`, `Zustand`, `Axios`, `Tailwind CSS`, `Lucide React`, `@twa-dev/sdk`;
 - backend: `Python 3.13`, стандартная библиотека Python для локального HTTP-сервера, `uvicorn` для ASGI-запуска;
-- деплой: `Render` через [`render.yaml`](./render.yaml).
+- деплой: Render Blueprint через [`render.yaml`](./render.yaml).
 
-## Структура репозитория
+## Структура
 
 ```text
 .
 |-- backend/
-|   |-- data/                 # профили пользователей
-|   |-- services/             # сервисы для рейтинга и пропусков
-|   |-- env.py                # загрузка .env
-|   |-- server.py             # основной backend
+|   |-- data/                 # создаётся автоматически для user_profiles.json
+|   |-- services/             # сервисы рейтинга и пропусков
+|   |-- env.py                # загрузка .env и .env.local
+|   |-- server.py             # основной backend, API, cache, ASGI wrapper
 |   |-- telegram_bot.py       # Telegram bot wrapper
 |   |-- *_test.py             # backend unit tests
 |-- frontend/
 |   |-- src/                  # интерфейс Mini App
-|   |-- package.json          # frontend scripts
-|   `-- vite.config.ts        # dev proxy на backend
+|   |-- package.json          # frontend, backend и test scripts
+|   `-- vite.config.ts        # proxy /api на локальный backend
 |-- server.py                 # ASGI entry point для uvicorn/Render
 |-- render.yaml               # Render Blueprint
-|-- .env.example
+|-- .env.example              # пример переменных окружения
 |-- BACKEND_PLAN.md
 `-- README.md
 ```
 
 Ключевые точки входа:
 
-- [`frontend/package.json`](./frontend/package.json) — запуск frontend, backend и тестов;
-- [`backend/server.py`](./backend/server.py) — локальный сервер и логика API;
-- [`server.py`](./server.py) — экспортирует `app` для команды `uvicorn server:app`.
-
-## Что хранится где
-
-- задачи планера и часть клиентских настроек сохраняются в `localStorage`;
-- профиль пользователя хранится и на клиенте, и на backend;
-- backend сохраняет профили в `backend/data/user_profiles.json` и создаёт этот файл при первом сохранении профиля;
-- пароль IIS не возвращается обратно в API профиля: вместо него frontend получает только признак `hasIisPassword`.
-
-Если вы деплоите проект в прод, это важно учитывать: сейчас хранилище профилей файловое, без БД и без внешнего secret storage.
+- [`frontend/package.json`](./frontend/package.json) — команды разработки;
+- [`frontend/vite.config.ts`](./frontend/vite.config.ts) — Vite proxy и сборка;
+- [`backend/server.py`](./backend/server.py) — backend API, нормализация, cache, ASGI adapter;
+- [`backend/telegram_bot.py`](./backend/telegram_bot.py) — long polling, webhook и кнопка Mini App;
+- [`server.py`](./server.py) — экспорт `app` для `uvicorn server:app`.
 
 ## Локальный запуск
 
 ### Требования
 
-- `Node.js` и `npm`;
-- `Python 3.13`.
+- Node.js и npm;
+- Python 3.13.
 
 ### 1. Подготовьте `.env`
 
@@ -106,18 +100,14 @@ npm install
 
 ### 3. Запустите backend
 
-В первом терминале:
-
 ```powershell
 cd frontend
 npm run dev:backend
 ```
 
-Backend поднимется на `http://localhost:8787`.
+Backend будет доступен на `http://localhost:8787`.
 
 ### 4. Запустите frontend
-
-Во втором терминале:
 
 ```powershell
 cd frontend
@@ -126,18 +116,16 @@ npm run dev
 
 Frontend будет доступен на `http://localhost:5173`.
 
-В `vite.config.ts` настроен proxy: все запросы на `/api` автоматически уходят на `http://localhost:8787`.
+Vite читает env из корня проекта и проксирует `/api` на `http://localhost:8787`.
 
 ### 5. При необходимости запустите Telegram-бота
-
-В третьем терминале:
 
 ```powershell
 cd frontend
 npm run dev:bot
 ```
 
-Это режим long polling для локальной разработки. Для публичного деплоя лучше использовать webhook через backend.
+Это long polling-режим для локальной разработки. Для публичного деплоя используется webhook через backend.
 
 ### 6. Проверьте backend
 
@@ -148,7 +136,7 @@ npm run dev:bot
 
 ## Скрипты
 
-Все основные команды живут в [`frontend/package.json`](./frontend/package.json):
+Основные команды находятся в [`frontend/package.json`](./frontend/package.json):
 
 ```powershell
 cd frontend
@@ -160,114 +148,179 @@ npm run lint
 npm run test:backend
 ```
 
-Важно: для обычной локальной разработки backend не требует сторонних Python-библиотек, потому что локальный сервер построен на стандартной библиотеке. `uvicorn` из [`backend/requirements.txt`](./backend/requirements.txt) нужен для ASGI-запуска и деплоя.
+`npm run test:backend` сейчас запускает основные backend-тесты: `server_test`, `telegram_bot_test`, `env_test`, `user_profiles_test`.
+
+Если нужно проверить сервисные тесты отдельно:
+
+```powershell
+cd ..
+python -m unittest -v backend.services.rating_test backend.services.omissions_test
+```
+
+## Данные и хранение
+
+- задачи планера и часть UI-настроек хранятся в `localStorage`;
+- профиль пользователя хранится на клиенте и в backend;
+- backend сохраняет профили в `backend/data/user_profiles.json`;
+- файл профилей создаётся автоматически при первом сохранении;
+- IIS-пароль не возвращается в API профиля, вместо него frontend получает `hasIisPassword`;
+- при изменении IIS-логина сохранённый IIS-пароль сбрасывается.
+
+Для production это важное ограничение: сейчас профили хранятся в файле, без БД и внешнего secret storage.
 
 ## Переменные окружения
 
-Полный список есть в [`.env.example`](./.env.example). Ниже только основные переменные.
+Полный пример находится в [`.env.example`](./.env.example).
 
 ### Frontend
 
-- `VITE_API_BASE_URL` — базовый URL backend API. Локально по умолчанию используется `/api`.
+- `VITE_API_BASE_URL` — базовый URL backend API. Локально обычно `/api`.
 
 ### Backend
 
 - `HOST` — адрес локального backend-сервера;
-- `PORT` — порт backend-сервера;
+- `PORT` — порт локального backend-сервера;
 - `IIS_BASE_URL` — upstream API БГУИР;
-- `CACHE_TTL_MS` — время жизни свежего кэша;
-- `STALE_TTL_MS` — сколько можно отдавать устаревший кэш;
-- `REQUEST_TIMEOUT_MS` — timeout запроса к upstream;
-- `MAX_RETRIES` и `RETRY_DELAY_MS` — настройки повторных попыток.
+- `CACHE_TTL_MS` — время жизни свежего backend cache;
+- `STALE_TTL_MS` — сколько backend может отдавать stale cache после истечения fresh cache;
+- `REQUEST_TIMEOUT_MS` — timeout upstream-запросов;
+- `MAX_RETRIES` — количество повторных попыток для временных upstream-ошибок;
+- `RETRY_DELAY_MS` — базовая задержка между retry.
 
 ### Telegram
 
-- `BOT_TOKEN` — токен бота;
+- `BOT_TOKEN` — токен Telegram-бота;
 - `MINI_APP_URL` — публичный HTTPS URL frontend;
-- `BACKEND_PUBLIC_URL` — публичный HTTPS URL backend;
+- `BACKEND_PUBLIC_URL` — публичный HTTPS URL backend для webhook;
 - `TELEGRAM_WEBHOOK_SECRET` — секрет для проверки Telegram webhook;
+- `TELEGRAM_API_BASE_URL` — базовый URL Telegram Bot API;
+- `TELEGRAM_POLLING_TIMEOUT_S` — timeout long polling;
+- `TELEGRAM_RETRY_DELAY_MS` — задержка retry в Telegram wrapper;
+- `TELEGRAM_DROP_PENDING_UPDATES` — сбрасывать pending updates при настройке;
+- `TELEGRAM_SET_CHAT_MENU_BUTTON` — устанавливать кнопку Mini App в меню чата;
 - `TELEGRAM_MINI_APP_BUTTON_TEXT` — текст кнопки открытия Mini App;
-- `TELEGRAM_START_TEXT` — текст сообщений `/start`, `/app`, `/help`;
-- `TELEGRAM_POLLING_TIMEOUT_S`, `TELEGRAM_RETRY_DELAY_MS`, `TELEGRAM_DROP_PENDING_UPDATES`, `TELEGRAM_SET_CHAT_MENU_BUTTON` — параметры работы Telegram wrapper.
+- `TELEGRAM_START_TEXT` — текст ответа на `/start`, `/app`, `/help`.
 
 ## Backend API
 
-Основные endpoint'ы:
+### Служебные endpoint'ы
 
-- `GET /` — краткая информация о сервисе;
-- `GET /api/health` — health-check backend;
-- `GET /api/schedule` — расписание по группе или преподавателю;
-- `GET /api/rating/{studentCardNumber}` — оценки, средний балл, позиция в рейтинге;
-- `GET /api/grades?studentCardNumber=...` — альтернативная точка для оценок;
-- `GET /api/omissions?telegramUserId=...` — пропуски по профилю студента;
-- `GET /api/search-employee?query=...` — поиск преподавателей;
-- `GET /api/employees?q=...` — совместимый alias для поиска преподавателей;
-- `GET /api/auditories?q=...` — поиск аудиторий;
-- `GET /api/free-auditories?...` — поиск свободных аудиторий;
-- `GET /api/profile?telegramUserId=...` — получить профиль;
-- `PUT /api/profile` и `POST /api/profile` — создать или обновить профиль;
-- `DELETE /api/profile?telegramUserId=...` — удалить профиль;
+- `GET /` — информация о backend-сервисе;
+- `GET /api/health` — health-check, uptime, текущий `iisBaseUrl`, количество cache entries;
 - `POST /telegram/webhook` — Telegram webhook.
 
-Ключевые параметры расписания:
+### Расписание
 
-- для студента нужен `studentGroup`;
-- для преподавателя нужен `teacherUrlId`;
-- дополнительно поддерживаются `teacherEmployeeId`, `subgroup`, `date`, `view`, `week`.
+- `GET /api/schedule`
+
+Параметры:
+
+- `studentGroup` — группа студента;
+- `teacherUrlId` или `urlId` — URL ID преподавателя;
+- `teacherEmployeeId` или `employeeId` — employee ID преподавателя, если есть;
+- `date` — опорная дата в формате `YYYY-MM-DD`;
+- `view` — `day`, `week`, `month` или `semester`;
+- `week` — номер учебной недели `1..4`;
+- `subgroup` — `all`, `1` или `2`.
+
+Нужен либо `studentGroup`, либо `teacherUrlId`.
+
+### Учёба
+
+- `GET /api/grades?studentCardNumber=...` — оценки и summary;
+- `GET /api/rating-summary?studentCardNumber=...` — облегчённый summary рейтинга;
+- `GET /api/rating/{studentCardNumber}` — совместимая точка рейтинга и оценок;
+- `GET /api/omissions?telegramUserId=...` — пропуски по сохранённому профилю студента.
+
+Дополнительно поддерживаются:
+
+- `studentGroup` — помогает вычислить позицию в рейтинге;
+- `telegramUserId` — привязывает запрос к сохранённому профилю;
+- `refresh=1` — обходит fresh cache для поддерживаемых учебных endpoint'ов.
+
+Для пропусков нужен сохранённый студенческий профиль с IIS-логином и IIS-паролем.
+
+### Университетский поиск
+
+- `GET /api/search-employee?query=...` — поиск преподавателей;
+- `GET /api/employees?q=...` — alias для поиска преподавателей;
+- `GET /api/auditories?q=...` — поиск аудиторий;
+- `GET /api/free-auditories?...` — аудитории с текущим и следующим занятием по расписанию группы или преподавателя.
+
+`/api/free-auditories` принимает `query` или `q`, а также `studentGroup` либо `teacherUrlId`.
+
+### Профиль
+
+- `GET /api/profile?telegramUserId=...` — получить профиль;
+- `PUT /api/profile` — создать или обновить профиль;
+- `POST /api/profile` — совместимый alias для сохранения профиля;
+- `DELETE /api/profile?telegramUserId=...` — удалить профиль.
+
+Профиль студента требует `telegramUserId`, `role=student`, `groupNumber` и `studentCardNumber` или `iisLogin`.
+
+Профиль преподавателя требует `telegramUserId`, `role=teacher`, `employeeId`, `urlId` и `fullName`.
 
 ## Telegram-бот
 
 Telegram wrapper находится в [`backend/telegram_bot.py`](./backend/telegram_bot.py).
 
-Что он умеет:
+Он:
 
 - отвечает на `/start`, `/app`, `/help`;
-- отправляет кнопку `web_app` для открытия Mini App;
-- умеет работать через long polling;
-- умеет автоматически регистрировать webhook;
-- может установить кнопку Mini App в меню чата.
+- отправляет inline-кнопку `web_app`;
+- может установить Mini App в меню чата;
+- работает через long polling локально;
+- автоматически регистрирует webhook при старте ASGI-приложения, если заданы `BOT_TOKEN`, `MINI_APP_URL` и `BACKEND_PUBLIC_URL`.
 
-Webhook на backend настраивается автоматически при старте ASGI-приложения, если заданы `BOT_TOKEN`, `MINI_APP_URL` и `BACKEND_PUBLIC_URL`.
-
-Важно: для реального открытия Mini App внутри Telegram нужен публичный `HTTPS` URL. Локальный `http://localhost:5173` подходит только для разработки в браузере.
+Для реального открытия Mini App внутри Telegram нужен публичный `HTTPS` URL. `http://localhost:5173` подходит только для разработки в браузере.
 
 ## Деплой на Render
 
-В репозитории уже есть [`render.yaml`](./render.yaml). Он создаёт два сервиса:
+[`render.yaml`](./render.yaml) описывает два сервиса:
 
-- `frontend-tg` — `Static Site` для Vite frontend;
-- `backend-tg-u57f` — `Web Service` для Python backend.
+- `frontend-tg` — Static Site для Vite frontend;
+- `backend-tg-u57f` — Python Web Service для backend.
 
-Что важно при деплое:
+Render-сборка:
 
-- frontend публикуется из `frontend/dist`;
-- backend стартует командой `uvicorn server:app --host 0.0.0.0 --port $PORT`;
-- `server.py` в корне нужен именно для такого запуска;
-- `VITE_API_BASE_URL` на frontend должен указывать на публичный backend `/api`;
-- `MINI_APP_URL` должен указывать на публичный frontend;
-- `BACKEND_PUBLIC_URL` должен указывать на публичный backend;
-- если нужен бот, задайте `BOT_TOKEN` и `TELEGRAM_WEBHOOK_SECRET`.
+- frontend: `cd frontend && npm ci && npm run build`;
+- frontend publish path: `frontend/dist`;
+- backend: `pip install -r backend/requirements.txt`;
+- backend start command: `uvicorn server:app --host 0.0.0.0 --port $PORT`;
+- backend health check: `/api/health`.
 
-Если имена сервисов или домены меняются, не забудьте обновить соответствующие env-переменные.
+При смене доменов или имён сервисов обновите:
 
-## Тесты и проверка качества
+- `VITE_API_BASE_URL`;
+- `MINI_APP_URL`;
+- `BACKEND_PUBLIC_URL`;
+- при необходимости `BOT_TOKEN` и `TELEGRAM_WEBHOOK_SECRET`.
 
-Backend тесты:
+## Проверка качества
+
+Backend:
 
 ```powershell
 cd frontend
 npm run test:backend
 ```
 
-Проверка frontend-кода:
+Frontend lint:
 
 ```powershell
 cd frontend
 npm run lint
 ```
 
+Frontend build:
+
+```powershell
+cd frontend
+npm run build
+```
+
 ## Дополнительно
 
-- Детали по backend и дальнейшему развитию: [`BACKEND_PLAN.md`](./BACKEND_PLAN.md)
+- Backend roadmap и правила развития: [`BACKEND_PLAN.md`](./BACKEND_PLAN.md)
 - Upstream API БГУИР: `https://iis.bsuir.by/api/v1`
 - Swagger upstream API: `https://iis.bsuir.by/api/v1/swagger`
