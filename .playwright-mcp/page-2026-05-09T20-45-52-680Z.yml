@@ -1,0 +1,44 @@
+- main [ref=e2]:
+  - region "Форма регистрации и авторизации" [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e5]: R
+      - generic [ref=e6]:
+        - paragraph [ref=e7]: Личный кабинет
+        - heading "Вход в закрытую зону" [level=1] [ref=e8]
+    - tablist "Выбор режима формы" [ref=e9]:
+      - tab "Вход" [selected] [ref=e10] [cursor=pointer]
+      - tab "Регистрация" [ref=e11] [cursor=pointer]
+    - generic [ref=e12]:
+      - generic [ref=e13]:
+        - generic [ref=e14]: Email
+        - textbox "Email" [ref=e15]:
+          - /placeholder: anton@example.com
+      - generic [ref=e16]:
+        - generic [ref=e17]: Пароль
+        - textbox "Пароль" [ref=e18]:
+          - /placeholder: Минимум 6 символов
+      - status [ref=e19]: Вы вошли в кабинет.
+      - button "Войти" [ref=e52] [cursor=pointer]
+  - region "Закрытый контент" [ref=e21]:
+    - generic [ref=e30]:
+      - generic [ref=e31]:
+        - generic [ref=e32]:
+          - paragraph [ref=e33]: Доступ открыт
+          - heading "Антон, добро пожаловать" [level=2] [ref=e34]
+        - button "Выйти" [ref=e35] [cursor=pointer]
+      - generic [ref=e36]:
+        - article [ref=e37]:
+          - generic [ref=e38]: Профиль
+          - strong [ref=e39]: Активен
+        - article [ref=e40]:
+          - generic [ref=e41]: Сообщения
+          - strong [ref=e42]: "3"
+        - article [ref=e43]:
+          - generic [ref=e44]: Задачи
+          - strong [ref=e45]: "7"
+      - generic [ref=e46]:
+        - heading "Материалы для пользователя" [level=3] [ref=e47]
+        - list [ref=e48]:
+          - listitem [ref=e49]: Персональная инструкция по настройке аккаунта
+          - listitem [ref=e50]: Закрытая подборка полезных ссылок
+          - listitem [ref=e51]: Черновик следующего шага в проекте

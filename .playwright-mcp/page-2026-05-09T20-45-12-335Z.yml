@@ -1,0 +1,30 @@
+- main [ref=e2]:
+  - region "Форма регистрации и авторизации" [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e5]: R
+      - generic [ref=e6]:
+        - paragraph [ref=e7]: Личный кабинет
+        - heading "Вход в закрытую зону" [level=1] [ref=e8]
+    - tablist "Выбор режима формы" [ref=e9]:
+      - tab "Вход" [ref=e10] [cursor=pointer]
+      - tab "Регистрация" [selected] [ref=e11] [cursor=pointer]
+    - generic [ref=e12]:
+      - generic [ref=e26]:
+        - generic [ref=e27]: Имя
+        - textbox "Имя" [ref=e28]:
+          - /placeholder: Антон
+      - generic [ref=e13]:
+        - generic [ref=e14]: Email
+        - textbox "Email" [ref=e15]:
+          - /placeholder: anton@example.com
+      - generic [ref=e16]:
+        - generic [ref=e17]: Пароль
+        - textbox "Пароль" [ref=e18]:
+          - /placeholder: Минимум 6 символов
+      - status [ref=e19]: Сессия завершена.
+      - button "Создать аккаунт" [ref=e29] [cursor=pointer]
+  - region "Закрытый контент" [ref=e21]:
+    - generic [ref=e22]:
+      - paragraph [ref=e23]: Демо-контент
+      - heading "После входа здесь появится персональная сводка." [level=2] [ref=e24]
+      - paragraph [ref=e25]: Создай пользователя или войди под уже зарегистрированным email. Данные хранятся только в браузере на этом компьютере.

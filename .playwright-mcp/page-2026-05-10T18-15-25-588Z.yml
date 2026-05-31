@@ -1,0 +1,12 @@
+- main [ref=e2]:
+  - generic [ref=e3]:
+    - paragraph [ref=e4]: FastAPI Admin
+    - heading "Вход" [level=1] [ref=e5]
+    - generic [ref=e6]:
+      - generic [ref=e7]:
+        - text: Логин
+        - textbox "Логин" [ref=e8]
+      - generic [ref=e9]:
+        - text: Пароль
+        - textbox "Пароль" [ref=e10]
+      - button "Войти" [ref=e11] [cursor=pointer]

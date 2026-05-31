@@ -1,0 +1,12 @@
+- generic [ref=e5]:
+  - heading "FastAPI Admin" [level=2] [ref=e6]
+  - generic [ref=e7]:
+    - generic [ref=e8]: username
+    - textbox "login_username_placeholder" [ref=e9]
+  - generic [ref=e10]:
+    - generic [ref=e11]: password
+    - textbox "login_password_placeholder" [ref=e13]
+  - generic [ref=e16]:
+    - checkbox "remember_me" [checked] [ref=e17]
+    - generic [ref=e18]: remember_me
+  - button "sign_in" [ref=e20] [cursor=pointer]
